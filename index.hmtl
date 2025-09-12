@@ -900,7 +900,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
 <script>
     JotForm.init(function(){
-      var endpoint = 'https://script.google.com/macros/s/XXXXX/exec'; // URL endpoint của bạn
+      var endpoint = 'https://script.google.com/a/macros/amchamvietnam.com/s/AKfycbzxLAp22vlfPiX-37eP8IooCnRuO9FTwX_8ZgZwAPXIhR1LVKZPBq5I9CIgK_BlB9C1/exec'; // URL endpoint của bạn
       var formEl   = document.getElementById('252484373306054');
       var nextBtns = ['form-pagebreak-next_39','form-pagebreak-next_55'];
       var submitBtn= document.getElementById('input_101');
@@ -972,4 +972,5 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
 <link id=color-scheme-style href="https://cdn.jotfor.ms/stylebuilder/static/color-scheme.css?v=3.3.65438" type="text/css" rel="stylesheet" /></body>
 </html><script type="text/javascript">JotForm.ownerView=true;</script><script type="text/javascript">JotForm.isNewSACL=true;</script>
+
 
