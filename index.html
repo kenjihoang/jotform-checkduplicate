@@ -882,27 +882,23 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 </html><script type="text/javascript">JotForm.ownerView=true;</script><script type="text/javascript">JotForm.isNewSACL=true;</script>
 
 <script>
-// ==== CONFIG: thay cho đúng form của bạn ====
-const API_URL = "https://script.google.com/macros/s/AKfycbzxLAp22vlfPiX-37eP8IooCnRuO9FTwX_8ZgZwAPXIhR1LVKZPBq5I9CIgK_BlB9C1/exec";
-
-// Mapping ID các field trong form Jotform (thay cho đúng)
+// ==== CONFIG ====
+const API_URL = "https://script.google.com/macros/s/AKfycbzxLAp22vlfPiX-37eP8IooCnRuO9FTwX_8ZgZwAPXIhR1LVKZPBq5I9CIgK_BlB9C1/exec"; // Thay bằng URL /exec của bạn
 const FIELD_IDS = {
-  email: "input_3",
-  personalId: "input_38",
-  studentId: "input_53"
+  email: "input_3",        // ID field email
+  personalId: "input_38",  // ID field personal ID
+  studentId: "input_53"    // ID field student ID
 };
 
 // ==== HELPERS ====
 function $(id){ return document.getElementById(id); }
-
 function getValues(){
-  const email = ($(FIELD_IDS.email)?.value || "").trim();
-  const personalId = ($(FIELD_IDS.personalId)?.value || "").trim();
-  const studentId = ($(FIELD_IDS.studentId)?.value || "").trim();
-  return { email, personalId, studentId };
+  return {
+    email: ($(FIELD_IDS.email)?.value || "").trim(),
+    personalId: ($(FIELD_IDS.personalId)?.value || "").trim(),
+    studentId: ($(FIELD_IDS.studentId)?.value || "").trim()
+  };
 }
-
-// Tạo / cập nhật thông báo lỗi ngay dưới input
 function showFieldError(inputId, message){
   const input = $(inputId);
   if(!input) return;
@@ -917,12 +913,9 @@ function showFieldError(inputId, message){
   }
   msg.textContent = message;
 }
-
 function clearErrors(){
   document.querySelectorAll(".dup-error").forEach(n => n.remove());
 }
-
-// Disable/enable nút để tránh double click
 function setBtnBusy(btn, busy){
   if(!btn) return;
   btn.disabled = !!busy;
@@ -932,34 +925,17 @@ function setBtnBusy(btn, busy){
   else if(btn.tagName === "INPUT") btn.value = label;
 }
 
-// ==== VALIDATION CALL ====
+// ==== VALIDATION ====
 async function validateDup(){
   clearErrors();
   const payload = getValues();
-
-  // Có thể thêm validate rỗng nhẹ
-  // if(!payload.personalId) showFieldError(FIELD_IDS.personalId, "Vui lòng nhập Personal ID");
-
-  // Gọi API Apps Script
   const res = await fetch(API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    // Tuyệt đối KHÔNG dùng mode: "no-cors"
     body: JSON.stringify(payload)
   });
-
-  // Nếu Apps Script chưa bật CORS đúng sẽ không tới đây (sẽ throw ở fetch)
   const data = await res.json();
-  // data kỳ vọng:
-  // { emailExists: boolean, personalIdExists: boolean, studentIdExists: boolean, error?: string }
-
   let hasError = false;
-  if(data.error){
-    // Lỗi từ server — hiển thị chung
-    alert("Server error: " + data.error);
-    return { ok: false };
-  }
-
   if(data.emailExists){
     showFieldError(FIELD_IDS.email, "Email này đã được sử dụng.");
     hasError = true;
@@ -972,69 +948,44 @@ async function validateDup(){
     showFieldError(FIELD_IDS.studentId, "Student ID này đã tồn tại.");
     hasError = true;
   }
-
   return { ok: !hasError };
 }
 
-// ==== HOOK JOTFORM BUTTONS ====
-// Bắt tất cả nút Next có id dạng form-pagebreak-next_XX và nút Submit
-function isNextBtn(el){
-  return el && el.id && el.id.startsWith("form-pagebreak-next_");
-}
-function isSubmitBtn(el){
-  // Tùy form, id submit có thể là input_XXX hoặc id submit chuyên biệt
-  return el && el.type === "submit" || (el.id && el.id.startsWith("input_") && (el.value?.toLowerCase().includes("submit") || el.name?.toLowerCase().includes("submit")));
-}
-
-// Để không làm hỏng hành vi gốc, ta sẽ:
-// - ngăn mặc định lần đầu
-// - gọi validate
-// - nếu ok: tạm bỏ listener rồi "click lại" để Jotform xử lý Next/Submit
+// ==== GẮN SỰ KIỆN CHO NÚT NEXT/SUBMIT ====
 function attachGuards(){
   const allBtns = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit']"));
   allBtns.forEach(btn => {
     if(btn.__dupGuardAttached) return;
-    if(!isNextBtn(btn) && !isSubmitBtn(btn)) return;
+    if(!(btn.id?.startsWith("form-pagebreak-next_") || btn.type === "submit")) return;
 
     const handler = async (e) => {
       e.preventDefault();
       e.stopPropagation();
-
       setBtnBusy(btn, true);
       try{
         const result = await validateDup();
         if(result.ok){
-          // Cho hành vi gốc chạy: bỏ listener rồi click lại
           btn.removeEventListener("click", handler, true);
           setBtnBusy(btn, false);
           btn.click();
-          // gắn lại sau 100ms để vẫn bảo vệ các lần sau
-          setTimeout(() => {
-            btn.addEventListener("click", handler, true);
-          }, 200);
+          setTimeout(() => btn.addEventListener("click", handler, true), 200);
         }else{
           setBtnBusy(btn, false);
         }
       }catch(err){
         setBtnBusy(btn, false);
-        console.error("Validate error:", err);
-        alert("Không thể kiểm tra trùng vì lỗi kết nối. Vui lòng thử lại.");
+        alert("Không thể kiểm tra trùng: " + err);
       }
     };
-
-    // capture = true để đón sự kiện trước Jotform
     btn.addEventListener("click", handler, true);
     btn.__dupGuardAttached = true;
   });
 }
-
-// Re-attach khi Jotform render lại trang
 const mo = new MutationObserver(() => attachGuards());
 mo.observe(document.documentElement, { childList: true, subtree: true });
-
-// Lần đầu trang load
 window.addEventListener("load", attachGuards);
 </script>
+
 
 
 
