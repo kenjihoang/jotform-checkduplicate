@@ -898,5 +898,78 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   </script><input type="hidden" id="input_97" name="q97_applicationId" class="form-textbox form-hidden" data-defaultvalue="ACS25-04984" data-component="autoincrement" aria-labelledby="label_97" value="ACS25-04984" />
 </form>
 
+<script>
+    JotForm.init(function(){
+      var endpoint = 'https://script.google.com/macros/s/XXXXX/exec'; // URL endpoint của bạn
+      var formEl   = document.getElementById('252484373306054');
+      var nextBtns = ['form-pagebreak-next_39','form-pagebreak-next_55'];
+      var submitBtn= document.getElementById('input_101');
+      var errors   = { '92':'emailExists','93':'personalIdExists','94':'studentIdExists' };
+
+      function hideAll(){
+        Object.keys(errors).forEach(qid => JotForm.hideField(qid));
+      }
+
+      function validate(cb){
+        hideAll();
+        var p = {
+          email: document.getElementById('input_3').value.trim(),
+          personalId: document.getElementById('input_38').value.trim(),
+          studentId: document.getElementById('input_53').value.trim()
+        };
+        fetch(endpoint,{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(p)
+        })
+        .then(r=>r.json())
+        .then(res=>{
+          var ok = true;
+          for(let qid in errors){
+            if(res[ errors[qid] ]){
+              JotForm.showField(qid);
+              ok = false;
+            }
+          }
+          cb(ok);
+        })
+        .catch(()=>{
+          cb(false);
+        });
+      }
+
+      nextBtns.forEach(id=>{
+        var btn = document.getElementById(id);
+        if(!btn) return;
+        btn.addEventListener('click', function handler(e){
+          e.preventDefault();
+          validate(function(ok){
+            if(ok){
+              btn.removeEventListener('click', handler);
+              btn.click();
+            }
+          });
+        });
+      });
+
+      if(submitBtn){
+        submitBtn.addEventListener('click', function(e){
+          e.preventDefault();
+          validate(function(ok){
+            if(ok) formEl.submit();
+          });
+        });
+      }
+
+      ['input_3','input_38','input_53'].forEach(id=>{
+        var inp = document.getElementById(id);
+        if(inp) inp.addEventListener('input', hideAll);
+      });
+    });
+    </script>
+</body>
+</html>
+
 <link id=color-scheme-style href="https://cdn.jotfor.ms/stylebuilder/static/color-scheme.css?v=3.3.65438" type="text/css" rel="stylesheet" /></body>
 </html><script type="text/javascript">JotForm.ownerView=true;</script><script type="text/javascript">JotForm.isNewSACL=true;</script>
+
