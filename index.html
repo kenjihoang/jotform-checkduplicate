@@ -882,76 +882,160 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 </html><script type="text/javascript">JotForm.ownerView=true;</script><script type="text/javascript">JotForm.isNewSACL=true;</script>
 
 <script>
-    JotForm.init(function(){
-      var endpoint = 'https://script.google.com/macros/amchamvietnam.com/s/AKfycbzxLAp22vlfPiX-37eP8IooCnRuO9FTwX_8ZgZwAPXIhR1LVKZPBq5I9CIgK_BlB9C1/exec'; // URL endpoint của bạn
-      var formEl   = document.getElementById('252484373306054');
-      var nextBtns = ['form-pagebreak-next_39','form-pagebreak-next_55'];
-      var submitBtn= document.getElementById('input_101');
-      var errors   = { '92':'emailExists','93':'personalIdExists','94':'studentIdExists' };
+// ==== CONFIG: thay cho đúng form của bạn ====
+const API_URL = "https://script.google.com/macros/s/AKfycbzxLAp22vlfPiX-37eP8IooCnRuO9FTwX_8ZgZwAPXIhR1LVKZPBq5I9CIgK_BlB9C1/exec";
 
-      function hideAll(){
-        Object.keys(errors).forEach(qid => JotForm.hideField(qid));
+// Mapping ID các field trong form Jotform (thay cho đúng)
+const FIELD_IDS = {
+  email: "input_3",
+  personalId: "input_38",
+  studentId: "input_53"
+};
+
+// ==== HELPERS ====
+function $(id){ return document.getElementById(id); }
+
+function getValues(){
+  const email = ($(FIELD_IDS.email)?.value || "").trim();
+  const personalId = ($(FIELD_IDS.personalId)?.value || "").trim();
+  const studentId = ($(FIELD_IDS.studentId)?.value || "").trim();
+  return { email, personalId, studentId };
+}
+
+// Tạo / cập nhật thông báo lỗi ngay dưới input
+function showFieldError(inputId, message){
+  const input = $(inputId);
+  if(!input) return;
+  let msg = input.parentElement.querySelector(".dup-error");
+  if(!msg){
+    msg = document.createElement("div");
+    msg.className = "dup-error";
+    msg.style.color = "#d93025";
+    msg.style.fontSize = "12px";
+    msg.style.marginTop = "6px";
+    input.parentElement.appendChild(msg);
+  }
+  msg.textContent = message;
+}
+
+function clearErrors(){
+  document.querySelectorAll(".dup-error").forEach(n => n.remove());
+}
+
+// Disable/enable nút để tránh double click
+function setBtnBusy(btn, busy){
+  if(!btn) return;
+  btn.disabled = !!busy;
+  btn.dataset.originalText ??= btn.textContent || btn.value || "";
+  const label = busy ? "Please wait..." : btn.dataset.originalText;
+  if(btn.tagName === "BUTTON") btn.textContent = label;
+  else if(btn.tagName === "INPUT") btn.value = label;
+}
+
+// ==== VALIDATION CALL ====
+async function validateDup(){
+  clearErrors();
+  const payload = getValues();
+
+  // Có thể thêm validate rỗng nhẹ
+  // if(!payload.personalId) showFieldError(FIELD_IDS.personalId, "Vui lòng nhập Personal ID");
+
+  // Gọi API Apps Script
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    // Tuyệt đối KHÔNG dùng mode: "no-cors"
+    body: JSON.stringify(payload)
+  });
+
+  // Nếu Apps Script chưa bật CORS đúng sẽ không tới đây (sẽ throw ở fetch)
+  const data = await res.json();
+  // data kỳ vọng:
+  // { emailExists: boolean, personalIdExists: boolean, studentIdExists: boolean, error?: string }
+
+  let hasError = false;
+  if(data.error){
+    // Lỗi từ server — hiển thị chung
+    alert("Server error: " + data.error);
+    return { ok: false };
+  }
+
+  if(data.emailExists){
+    showFieldError(FIELD_IDS.email, "Email này đã được sử dụng.");
+    hasError = true;
+  }
+  if(data.personalIdExists){
+    showFieldError(FIELD_IDS.personalId, "Personal ID này đã tồn tại.");
+    hasError = true;
+  }
+  if(data.studentIdExists){
+    showFieldError(FIELD_IDS.studentId, "Student ID này đã tồn tại.");
+    hasError = true;
+  }
+
+  return { ok: !hasError };
+}
+
+// ==== HOOK JOTFORM BUTTONS ====
+// Bắt tất cả nút Next có id dạng form-pagebreak-next_XX và nút Submit
+function isNextBtn(el){
+  return el && el.id && el.id.startsWith("form-pagebreak-next_");
+}
+function isSubmitBtn(el){
+  // Tùy form, id submit có thể là input_XXX hoặc id submit chuyên biệt
+  return el && el.type === "submit" || (el.id && el.id.startsWith("input_") && (el.value?.toLowerCase().includes("submit") || el.name?.toLowerCase().includes("submit")));
+}
+
+// Để không làm hỏng hành vi gốc, ta sẽ:
+// - ngăn mặc định lần đầu
+// - gọi validate
+// - nếu ok: tạm bỏ listener rồi "click lại" để Jotform xử lý Next/Submit
+function attachGuards(){
+  const allBtns = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit']"));
+  allBtns.forEach(btn => {
+    if(btn.__dupGuardAttached) return;
+    if(!isNextBtn(btn) && !isSubmitBtn(btn)) return;
+
+    const handler = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      setBtnBusy(btn, true);
+      try{
+        const result = await validateDup();
+        if(result.ok){
+          // Cho hành vi gốc chạy: bỏ listener rồi click lại
+          btn.removeEventListener("click", handler, true);
+          setBtnBusy(btn, false);
+          btn.click();
+          // gắn lại sau 100ms để vẫn bảo vệ các lần sau
+          setTimeout(() => {
+            btn.addEventListener("click", handler, true);
+          }, 200);
+        }else{
+          setBtnBusy(btn, false);
+        }
+      }catch(err){
+        setBtnBusy(btn, false);
+        console.error("Validate error:", err);
+        alert("Không thể kiểm tra trùng vì lỗi kết nối. Vui lòng thử lại.");
       }
+    };
 
-      function validate(cb){
-        hideAll();
-        var p = {
-          email: document.getElementById('input_3').value.trim(),
-          personalId: document.getElementById('input_38').value.trim(),
-          studentId: document.getElementById('input_53').value.trim()
-        };
-        fetch(endpoint,{
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify(p)
-        })
-        .then(r=>r.json())
-        .then(res=>{
-          var ok = true;
-          for(let qid in errors){
-            if(res[ errors[qid] ]){
-              JotForm.showField(qid);
-              ok = false;
-            }
-          }
-          cb(ok);
-        })
-        .catch(()=>{
-          cb(false);
-        });
-      }
+    // capture = true để đón sự kiện trước Jotform
+    btn.addEventListener("click", handler, true);
+    btn.__dupGuardAttached = true;
+  });
+}
 
-      nextBtns.forEach(id=>{
-        var btn = document.getElementById(id);
-        if(!btn) return;
-        btn.addEventListener('click', function handler(e){
-          e.preventDefault();
-          validate(function(ok){
-            if(ok){
-              btn.removeEventListener('click', handler);
-              btn.click();
-            }
-          });
-        });
-      });
+// Re-attach khi Jotform render lại trang
+const mo = new MutationObserver(() => attachGuards());
+mo.observe(document.documentElement, { childList: true, subtree: true });
 
-      if(submitBtn){
-        submitBtn.addEventListener('click', function(e){
-          e.preventDefault();
-          validate(function(ok){
-            if(ok) formEl.submit();
-          });
-        });
-      }
+// Lần đầu trang load
+window.addEventListener("load", attachGuards);
+</script>
 
-      ['input_3','input_38','input_53'].forEach(id=>{
-        var inp = document.getElementById(id);
-        if(inp) inp.addEventListener('input', hideAll);
-      });
-    });
-    </script>
-</body>
-</html>
 
 
 
