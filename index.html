@@ -925,41 +925,36 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 <script>
 const API_URL = 'https://script.google.com/macros/s/AKfycbzxLAp22vlfPiX-37eP8IooCnRuO9FTwX_8ZgZwAPXIhR1LVKZPBq5I9CIgK_BlB9C1/exec';
 
-// Định nghĩa field + error-field
 const FIELD_MAP = {
   email:      { id: '#input_3',  errorName: 'ErrorMessage_EmailExists', exists: false },
   personalId: { id: '#input_38', errorName: 'ErrorMessage_PIDExists',   exists: false },
   studentId:  { id: '#input_53', errorName: 'ErrorMessage_SIDExists',   exists: false }
 };
 
-// Hiển thị/ẩn field báo lỗi
-function showError(uniqueName) {
-  const el = document.querySelector(`[name="${uniqueName}"]`);
+function showError(name) {
+  const el = document.querySelector(`[name="${name}"]`);
   if (el) el.closest('.form-line').style.display = 'block';
 }
-function hideError(uniqueName) {
-  const el = document.querySelector(`[name="${uniqueName}"]`);
+function hideError(name) {
+  const el = document.querySelector(`[name="${name}"]`);
   if (el) el.closest('.form-line').style.display = 'none';
 }
 
-// Gọi API check duplicate
 async function checkExists(fieldKey, value) {
   if (!value) {
     FIELD_MAP[fieldKey].exists = false;
     hideError(FIELD_MAP[fieldKey].errorName);
     return;
   }
-
   try {
     const res = await fetch(API_URL, {
       method: 'POST',
-      mode:   'cors',
+      mode: 'cors',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ [fieldKey]: value })
     });
     const data = await res.json();
     const flag = fieldKey + 'Exists';
-
     if (data[flag]) {
       FIELD_MAP[fieldKey].exists = true;
       showError(FIELD_MAP[fieldKey].errorName);
@@ -967,13 +962,12 @@ async function checkExists(fieldKey, value) {
       FIELD_MAP[fieldKey].exists = false;
       hideError(FIELD_MAP[fieldKey].errorName);
     }
-
   } catch (err) {
     console.error('API error:', err);
   }
 }
 
-// 1) Blur events: check ngay khi rời field
+// Gắn blur event
 Object.keys(FIELD_MAP).forEach(key => {
   const input = document.querySelector(FIELD_MAP[key].id);
   if (input) {
@@ -983,40 +977,15 @@ Object.keys(FIELD_MAP).forEach(key => {
   }
 });
 
-// 2) Click Next: chặn trang 2 và 3 nếu có lỗi
+// Chặn Next nếu có lỗi
 document.querySelectorAll('[id^="form-pagebreak-next_"]').forEach(btn => {
   btn.addEventListener('click', e => {
-    const id = btn.id;
-
-    // Trang 2: email + personalId
-    if (id === 'form-pagebreak-next_39') {
-      if (FIELD_MAP.email.exists || FIELD_MAP.personalId.exists) {
-        e.preventDefault();
-      }
+    if (btn.id === 'form-pagebreak-next_39') {
+      if (FIELD_MAP.email.exists || FIELD_MAP.personalId.exists) e.preventDefault();
     }
-
-    // Trang 3: studentId
-    if (id === 'form-pagebreak-next_55') {
-      if (FIELD_MAP.studentId.exists) {
-        e.preventDefault();
-      }
+    if (btn.id === 'form-pagebreak-next_55') {
+      if (FIELD_MAP.studentId.exists) e.preventDefault();
     }
   });
 });
 </script>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
