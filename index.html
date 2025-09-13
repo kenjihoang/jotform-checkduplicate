@@ -923,75 +923,80 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 </style>
 
 <script>
-const API_URL = "https://script.google.com/macros/s/AKfycbzxLAp22vlfPiX-37eP8IooCnRuO9FTwX_8ZgZwAPXIhR1LVKZPBq5I9CIgK_BlB9C1/exec";
+const API_URL = 'https://script.google.com/macros/s/AKfycbzxLAp22vlfPiX-37eP8IooCnRuO9FTwX_8ZgZwAPXIhR1LVKZPBq5I9CIgK_BlB9C1/exec';
 
+// Định nghĩa field + error-field
 const FIELD_MAP = {
-  email:      { id: "#input_3",  errorName: "ErrorMessage_EmailExists", exists: false },
-  personalId: { id: "#input_38", errorName: "ErrorMessage_PIDExists",   exists: false },
-  studentId:  { id: "#input_53", errorName: "ErrorMessage_SIDExists",   exists: false }
+  email:      { id: '#input_3',  errorName: 'ErrorMessage_EmailExists', exists: false },
+  personalId: { id: '#input_38', errorName: 'ErrorMessage_PIDExists',   exists: false },
+  studentId:  { id: '#input_53', errorName: 'ErrorMessage_SIDExists',   exists: false }
 };
 
-function showErrorField(uniqueName) {
+// Hiển thị/ẩn field báo lỗi
+function showError(uniqueName) {
   const el = document.querySelector(`[name="${uniqueName}"]`);
-  if (el) el.closest(".form-line").style.display = "block";
+  if (el) el.closest('.form-line').style.display = 'block';
 }
-function hideErrorField(uniqueName) {
+function hideError(uniqueName) {
   const el = document.querySelector(`[name="${uniqueName}"]`);
-  if (el) el.closest(".form-line").style.display = "none";
+  if (el) el.closest('.form-line').style.display = 'none';
 }
 
+// Gọi API check duplicate
 async function checkExists(fieldKey, value) {
   if (!value) {
     FIELD_MAP[fieldKey].exists = false;
-    hideErrorField(FIELD_MAP[fieldKey].errorName);
+    hideError(FIELD_MAP[fieldKey].errorName);
     return;
   }
-  const payload = {};
-  payload[fieldKey] = value;
 
   try {
     const res = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      method: 'POST',
+      mode:   'cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [fieldKey]: value })
     });
     const data = await res.json();
+    const flag = fieldKey + 'Exists';
 
-    const keyExistsFlag = fieldKey + "Exists";
-    if (data[keyExistsFlag]) {
+    if (data[flag]) {
       FIELD_MAP[fieldKey].exists = true;
-      showErrorField(FIELD_MAP[fieldKey].errorName);
+      showError(FIELD_MAP[fieldKey].errorName);
     } else {
       FIELD_MAP[fieldKey].exists = false;
-      hideErrorField(FIELD_MAP[fieldKey].errorName);
+      hideError(FIELD_MAP[fieldKey].errorName);
     }
+
   } catch (err) {
-    console.error("API error:", err);
+    console.error('API error:', err);
   }
 }
 
-// Gắn sự kiện blur để check ngay khi rời field
+// 1) Blur events: check ngay khi rời field
 Object.keys(FIELD_MAP).forEach(key => {
   const input = document.querySelector(FIELD_MAP[key].id);
   if (input) {
-    input.addEventListener("blur", () => {
+    input.addEventListener('blur', () => {
       checkExists(key, input.value.trim());
     });
   }
 });
 
-// Chặn Next nếu có lỗi
+// 2) Click Next: chặn trang 2 và 3 nếu có lỗi
 document.querySelectorAll('[id^="form-pagebreak-next_"]').forEach(btn => {
-  btn.addEventListener("click", (e) => {
-    const btnId = btn.id;
+  btn.addEventListener('click', e => {
+    const id = btn.id;
 
-    if (btnId === "form-pagebreak-next_39") {
+    // Trang 2: email + personalId
+    if (id === 'form-pagebreak-next_39') {
       if (FIELD_MAP.email.exists || FIELD_MAP.personalId.exists) {
         e.preventDefault();
       }
     }
 
-    if (btnId === "form-pagebreak-next_55") {
+    // Trang 3: studentId
+    if (id === 'form-pagebreak-next_55') {
       if (FIELD_MAP.studentId.exists) {
         e.preventDefault();
       }
@@ -999,6 +1004,7 @@ document.querySelectorAll('[id^="form-pagebreak-next_"]').forEach(btn => {
   });
 });
 </script>
+
 
 
 
