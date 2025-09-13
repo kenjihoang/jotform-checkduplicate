@@ -949,20 +949,24 @@ async function checkExists(fieldKey, value) {
   const payload = {};
   payload[fieldKey] = value;
 
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  const data = await res.json();
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
 
-  const keyExistsFlag = fieldKey + "Exists";
-  if (data[keyExistsFlag]) {
-    FIELD_MAP[fieldKey].exists = true;
-    showErrorField(FIELD_MAP[fieldKey].errorName);
-  } else {
-    FIELD_MAP[fieldKey].exists = false;
-    hideErrorField(FIELD_MAP[fieldKey].errorName);
+    const keyExistsFlag = fieldKey + "Exists";
+    if (data[keyExistsFlag]) {
+      FIELD_MAP[fieldKey].exists = true;
+      showErrorField(FIELD_MAP[fieldKey].errorName);
+    } else {
+      FIELD_MAP[fieldKey].exists = false;
+      hideErrorField(FIELD_MAP[fieldKey].errorName);
+    }
+  } catch (err) {
+    console.error("API error:", err);
   }
 }
 
@@ -981,14 +985,12 @@ document.querySelectorAll('[id^="form-pagebreak-next_"]').forEach(btn => {
   btn.addEventListener("click", (e) => {
     const btnId = btn.id;
 
-    // Trang 2: email + personalId
     if (btnId === "form-pagebreak-next_39") {
       if (FIELD_MAP.email.exists || FIELD_MAP.personalId.exists) {
         e.preventDefault();
       }
     }
 
-    // Trang 3: studentId
     if (btnId === "form-pagebreak-next_55") {
       if (FIELD_MAP.studentId.exists) {
         e.preventDefault();
@@ -997,6 +999,7 @@ document.querySelectorAll('[id^="form-pagebreak-next_"]').forEach(btn => {
   });
 });
 </script>
+
 
 
 
