@@ -882,109 +882,107 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 </html><script type="text/javascript">JotForm.ownerView=true;</script><script type="text/javascript">JotForm.isNewSACL=true;</script>
 
 <script>
-// ==== CONFIG ====
-const API_URL = "https://script.google.com/macros/s/AKfycbzxLAp22vlfPiX-37eP8IooCnRuO9FTwX_8ZgZwAPXIhR1LVKZPBq5I9CIgK_BlB9C1/exec"; // Thay bằng URL /exec của bạn
-const FIELD_IDS = {
-  email: "input_3",        // ID field email
-  personalId: "input_38",  // ID field personal ID
-  studentId: "input_53"    // ID field student ID
+const API_URL = "https://script.google.com/macros/s/AKfycbzxLAp22vlfPiX-37eP8IooCnRuO9FTwX_8ZgZwAPXIhR1LVKZPBq5I9CIgK_BlB9C1/exec";
+
+// Map field IDs và error field unique name
+const FIELD_MAP = {
+  email: {
+    id: "#input_3",
+    errorName: "ErrorMessage_EmailExists"
+  },
+  personalId: {
+    id: "#input_38",
+    errorName: "ErrorMessage_PIDExists"
+  },
+  studentId: {
+    id: "#input_53",
+    errorName: "ErrorMessage_SIDExists"
+  }
 };
 
-// ==== HELPERS ====
-function $(id){ return document.getElementById(id); }
-function getValues(){
-  return {
-    email: ($(FIELD_IDS.email)?.value || "").trim(),
-    personalId: ($(FIELD_IDS.personalId)?.value || "").trim(),
-    studentId: ($(FIELD_IDS.studentId)?.value || "").trim()
-  };
-}
-function showFieldError(inputId, message){
-  const input = $(inputId);
-  if(!input) return;
-  let msg = input.parentElement.querySelector(".dup-error");
-  if(!msg){
-    msg = document.createElement("div");
-    msg.className = "dup-error";
-    msg.style.color = "#d93025";
-    msg.style.fontSize = "12px";
-    msg.style.marginTop = "6px";
-    input.parentElement.appendChild(msg);
+// Hàm hiển thị field báo lỗi (Jotform sẽ tự show nếu bỏ hidden)
+function showErrorField(uniqueName) {
+  const el = document.querySelector(`[name="${uniqueName}"]`);
+  if (el) {
+    const wrapper = el.closest(".form-line");
+    if (wrapper) wrapper.style.display = "block";
   }
-  msg.textContent = message;
-}
-function clearErrors(){
-  document.querySelectorAll(".dup-error").forEach(n => n.remove());
-}
-function setBtnBusy(btn, busy){
-  if(!btn) return;
-  btn.disabled = !!busy;
-  btn.dataset.originalText ??= btn.textContent || btn.value || "";
-  const label = busy ? "Please wait..." : btn.dataset.originalText;
-  if(btn.tagName === "BUTTON") btn.textContent = label;
-  else if(btn.tagName === "INPUT") btn.value = label;
 }
 
-// ==== VALIDATION ====
-async function validateDup(){
-  clearErrors();
-  const payload = getValues();
+// Hàm ẩn field báo lỗi
+function hideErrorField(uniqueName) {
+  const el = document.querySelector(`[name="${uniqueName}"]`);
+  if (el) {
+    const wrapper = el.closest(".form-line");
+    if (wrapper) wrapper.style.display = "none";
+  }
+}
+
+// Gắn listener để ẩn lỗi khi sửa field
+Object.values(FIELD_MAP).forEach(f => {
+  const input = document.querySelector(f.id);
+  if (input) {
+    input.addEventListener("input", () => hideErrorField(f.errorName));
+  }
+});
+
+// Hàm kiểm tra trùng qua API
+async function checkExists(payload) {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
-  const data = await res.json();
-  let hasError = false;
-  if(data.emailExists){
-    showFieldError(FIELD_IDS.email, "Email này đã được sử dụng.");
-    hasError = true;
-  }
-  if(data.personalIdExists){
-    showFieldError(FIELD_IDS.personalId, "Personal ID này đã tồn tại.");
-    hasError = true;
-  }
-  if(data.studentIdExists){
-    showFieldError(FIELD_IDS.studentId, "Student ID này đã tồn tại.");
-    hasError = true;
-  }
-  return { ok: !hasError };
+  return res.json();
 }
 
-// ==== GẮN SỰ KIỆN CHO NÚT NEXT/SUBMIT ====
-function attachGuards(){
-  const allBtns = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit']"));
-  allBtns.forEach(btn => {
-    if(btn.__dupGuardAttached) return;
-    if(!(btn.id?.startsWith("form-pagebreak-next_") || btn.type === "submit")) return;
+// Bắt sự kiện click nút Next bằng wildcard
+document.querySelectorAll('[id^="form-pagebreak-next_"]').forEach(btn => {
+  btn.addEventListener("click", async (e) => {
+    const btnId = btn.id;
 
-    const handler = async (e) => {
+    // Trang 2: kiểm tra email + personalId
+    if (btnId === "form-pagebreak-next_39") {
       e.preventDefault();
-      e.stopPropagation();
-      setBtnBusy(btn, true);
-      try{
-        const result = await validateDup();
-        if(result.ok){
-          btn.removeEventListener("click", handler, true);
-          setBtnBusy(btn, false);
-          btn.click();
-          setTimeout(() => btn.addEventListener("click", handler, true), 200);
-        }else{
-          setBtnBusy(btn, false);
-        }
-      }catch(err){
-        setBtnBusy(btn, false);
-        alert("Không thể kiểm tra trùng: " + err);
+
+      const emailVal = document.querySelector(FIELD_MAP.email.id)?.value.trim();
+      const pidVal = document.querySelector(FIELD_MAP.personalId.id)?.value.trim();
+
+      const result = await checkExists({ email: emailVal, personalId: pidVal });
+
+      let hasError = false;
+      if (result.emailExists) {
+        showErrorField(FIELD_MAP.email.errorName);
+        hasError = true;
       }
-    };
-    btn.addEventListener("click", handler, true);
-    btn.__dupGuardAttached = true;
+      if (result.personalIdExists) {
+        showErrorField(FIELD_MAP.personalId.errorName);
+        hasError = true;
+      }
+
+      if (!hasError) {
+        btn.click(); // cho phép sang trang tiếp
+      }
+    }
+
+    // Trang 3: kiểm tra studentId
+    if (btnId === "form-pagebreak-next_55") {
+      e.preventDefault();
+
+      const sidVal = document.querySelector(FIELD_MAP.studentId.id)?.value.trim();
+
+      const result = await checkExists({ studentId: sidVal });
+
+      if (result.studentIdExists) {
+        showErrorField(FIELD_MAP.studentId.errorName);
+      } else {
+        btn.click(); // cho phép sang trang tiếp
+      }
+    }
   });
-}
-const mo = new MutationObserver(() => attachGuards());
-mo.observe(document.documentElement, { childList: true, subtree: true });
-window.addEventListener("load", attachGuards);
+});
 </script>
+
 
 
 
