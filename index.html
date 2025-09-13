@@ -902,6 +902,26 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 }
 </style>
 
+<style>
+#loadingSpinner {
+  display: none;
+  margin-left: 10px;
+}
+#loadingSpinner::after {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #ccc;
+  border-top-color: #333;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+</style>
+
 <script>
 const API_URL = "https://script.google.com/macros/s/AKfycbzxLAp22vlfPiX-37eP8IooCnRuO9FTwX_8ZgZwAPXIhR1LVKZPBq5I9CIgK_BlB9C1/exec";
 
@@ -920,10 +940,9 @@ function hideErrorField(uniqueName) {
   if (el) el.closest(".form-line").style.display = "none";
 }
 Object.values(FIELD_MAP).forEach(f => {
-  const input = document.querySelector(f.id);
-  if (input) {
-    input.addEventListener("input", () => hideErrorField(f.errorName));
-  }
+  document.addEventListener("input", (e) => {
+    if (e.target.matches(f.id)) hideErrorField(f.errorName);
+  });
 });
 
 async function checkExists(payload) {
@@ -940,53 +959,55 @@ async function checkExists(payload) {
   }
 }
 
-document.querySelectorAll('[id^="form-pagebreak-next_"]').forEach(btn => {
-  btn.insertAdjacentHTML("afterend", '<span id="loadingSpinner"></span>');
+window.addEventListener("load", () => {
+  // Thêm spinner vào cuối form
+  const form = document.querySelector("form.jotform-form");
+  if (form) {
+    const spinner = document.createElement("span");
+    spinner.id = "loadingSpinner";
+    form.appendChild(spinner);
 
-  btn.addEventListener("click", async (e) => {
-    const btnId = btn.id;
+    form.addEventListener("submit", async (e) => {
+      // Xác định trang hiện tại
+      const currentPage = parseInt(form.querySelector('input[name="currentPage"]').value, 10);
 
-    // Trang 2: kiểm tra email + personalId
-    if (btnId === "form-pagebreak-next_39") {
-      e.preventDefault();
+      if (currentPage === 2) {
+        e.preventDefault();
+        const emailVal = document.querySelector(FIELD_MAP.email.id)?.value.trim();
+        const pidVal   = document.querySelector(FIELD_MAP.personalId.id)?.value.trim();
 
-      const emailVal = document.querySelector(FIELD_MAP.email.id)?.value.trim();
-      const pidVal   = document.querySelector(FIELD_MAP.personalId.id)?.value.trim();
+        const result = await checkExists({ email: emailVal, personalId: pidVal });
 
-      const result = await checkExists({ email: emailVal, personalId: pidVal });
+        let hasError = false;
+        if (result.emailExists) {
+          showErrorField(FIELD_MAP.email.errorName);
+          hasError = true;
+        }
+        if (result.personalIdExists) {
+          showErrorField(FIELD_MAP.personalId.errorName);
+          hasError = true;
+        }
 
-      let hasError = false;
-      if (result.emailExists) {
-        showErrorField(FIELD_MAP.email.errorName);
-        hasError = true;
+        if (!hasError) form.submit(); // cho sang trang tiếp
       }
-      if (result.personalIdExists) {
-        showErrorField(FIELD_MAP.personalId.errorName);
-        hasError = true;
+
+      if (currentPage === 3) {
+        e.preventDefault();
+        const sidVal = document.querySelector(FIELD_MAP.studentId.id)?.value.trim();
+
+        const result = await checkExists({ studentId: sidVal });
+
+        if (result.studentIdExists) {
+          showErrorField(FIELD_MAP.studentId.errorName);
+        } else {
+          form.submit();
+        }
       }
-
-      if (!hasError) {
-        Jotform.nextPage(); // sang trang tiếp
-      }
-    }
-
-    // Trang 3: kiểm tra studentId
-    if (btnId === "form-pagebreak-next_55") {
-      e.preventDefault();
-
-      const sidVal = document.querySelector(FIELD_MAP.studentId.id)?.value.trim();
-
-      const result = await checkExists({ studentId: sidVal });
-
-      if (result.studentIdExists) {
-        showErrorField(FIELD_MAP.studentId.errorName);
-      } else {
-        Jotform.nextPage();
-      }
-    }
-  });
+    });
+  }
 });
 </script>
+
 
 
 
