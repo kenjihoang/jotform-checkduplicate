@@ -926,9 +926,9 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 const API_URL = "https://script.google.com/macros/s/AKfycbzxLAp22vlfPiX-37eP8IooCnRuO9FTwX_8ZgZwAPXIhR1LVKZPBq5I9CIgK_BlB9C1/exec";
 
 const FIELD_MAP = {
-  email:      { id: "#input_3",  errorName: "ErrorMessage_EmailExists" },
-  personalId: { id: "#input_38", errorName: "ErrorMessage_PIDExists" },
-  studentId:  { id: "#input_53", errorName: "ErrorMessage_SIDExists" }
+  email:      { id: "#input_3",  errorName: "ErrorMessage_EmailExists", exists: false },
+  personalId: { id: "#input_38", errorName: "ErrorMessage_PIDExists",   exists: false },
+  studentId:  { id: "#input_53", errorName: "ErrorMessage_SIDExists",   exists: false }
 };
 
 function showErrorField(uniqueName) {
@@ -939,74 +939,65 @@ function hideErrorField(uniqueName) {
   const el = document.querySelector(`[name="${uniqueName}"]`);
   if (el) el.closest(".form-line").style.display = "none";
 }
-Object.values(FIELD_MAP).forEach(f => {
-  document.addEventListener("input", (e) => {
-    if (e.target.matches(f.id)) hideErrorField(f.errorName);
-  });
-});
 
-async function checkExists(payload) {
-  document.getElementById("loadingSpinner").style.display = "inline-block";
-  try {
-    const res = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    return await res.json();
-  } finally {
-    document.getElementById("loadingSpinner").style.display = "none";
+async function checkExists(fieldKey, value) {
+  if (!value) {
+    FIELD_MAP[fieldKey].exists = false;
+    hideErrorField(FIELD_MAP[fieldKey].errorName);
+    return;
+  }
+  const payload = {};
+  payload[fieldKey] = value;
+
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+
+  const keyExistsFlag = fieldKey + "Exists";
+  if (data[keyExistsFlag]) {
+    FIELD_MAP[fieldKey].exists = true;
+    showErrorField(FIELD_MAP[fieldKey].errorName);
+  } else {
+    FIELD_MAP[fieldKey].exists = false;
+    hideErrorField(FIELD_MAP[fieldKey].errorName);
   }
 }
 
-window.addEventListener("load", () => {
-  // Thêm spinner vào cuối form
-  const form = document.querySelector("form.jotform-form");
-  if (form) {
-    const spinner = document.createElement("span");
-    spinner.id = "loadingSpinner";
-    form.appendChild(spinner);
-
-    form.addEventListener("submit", async (e) => {
-      // Xác định trang hiện tại
-      const currentPage = parseInt(form.querySelector('input[name="currentPage"]').value, 10);
-
-      if (currentPage === 2) {
-        e.preventDefault();
-        const emailVal = document.querySelector(FIELD_MAP.email.id)?.value.trim();
-        const pidVal   = document.querySelector(FIELD_MAP.personalId.id)?.value.trim();
-
-        const result = await checkExists({ email: emailVal, personalId: pidVal });
-
-        let hasError = false;
-        if (result.emailExists) {
-          showErrorField(FIELD_MAP.email.errorName);
-          hasError = true;
-        }
-        if (result.personalIdExists) {
-          showErrorField(FIELD_MAP.personalId.errorName);
-          hasError = true;
-        }
-
-        if (!hasError) form.submit(); // cho sang trang tiếp
-      }
-
-      if (currentPage === 3) {
-        e.preventDefault();
-        const sidVal = document.querySelector(FIELD_MAP.studentId.id)?.value.trim();
-
-        const result = await checkExists({ studentId: sidVal });
-
-        if (result.studentIdExists) {
-          showErrorField(FIELD_MAP.studentId.errorName);
-        } else {
-          form.submit();
-        }
-      }
+// Gắn sự kiện blur để check ngay khi rời field
+Object.keys(FIELD_MAP).forEach(key => {
+  const input = document.querySelector(FIELD_MAP[key].id);
+  if (input) {
+    input.addEventListener("blur", () => {
+      checkExists(key, input.value.trim());
     });
   }
 });
+
+// Chặn Next nếu có lỗi
+document.querySelectorAll('[id^="form-pagebreak-next_"]').forEach(btn => {
+  btn.addEventListener("click", (e) => {
+    const btnId = btn.id;
+
+    // Trang 2: email + personalId
+    if (btnId === "form-pagebreak-next_39") {
+      if (FIELD_MAP.email.exists || FIELD_MAP.personalId.exists) {
+        e.preventDefault();
+      }
+    }
+
+    // Trang 3: studentId
+    if (btnId === "form-pagebreak-next_55") {
+      if (FIELD_MAP.studentId.exists) {
+        e.preventDefault();
+      }
+    }
+  });
+});
 </script>
+
 
 
 
