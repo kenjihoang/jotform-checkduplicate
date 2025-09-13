@@ -881,44 +881,44 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 <link id=color-scheme-style href="https://cdn.jotfor.ms/stylebuilder/static/color-scheme.css?v=3.3.65438" type="text/css" rel="stylesheet" /></body>
 </html><script type="text/javascript">JotForm.ownerView=true;</script><script type="text/javascript">JotForm.isNewSACL=true;</script>
 
+<style>
+/* Spinner style */
+#loadingSpinner {
+  display: none;
+  margin-left: 10px;
+}
+#loadingSpinner::after {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #ccc;
+  border-top-color: #333;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+</style>
+
 <script>
 const API_URL = "https://script.google.com/macros/s/AKfycbzxLAp22vlfPiX-37eP8IooCnRuO9FTwX_8ZgZwAPXIhR1LVKZPBq5I9CIgK_BlB9C1/exec";
 
-// Map field IDs và error field unique name
 const FIELD_MAP = {
-  email: {
-    id: "#input_3",
-    errorName: "ErrorMessage_EmailExists"
-  },
-  personalId: {
-    id: "#input_38",
-    errorName: "ErrorMessage_PIDExists"
-  },
-  studentId: {
-    id: "#input_53",
-    errorName: "ErrorMessage_SIDExists"
-  }
+  email:      { id: "#input_3",  errorName: "ErrorMessage_EmailExists" },
+  personalId: { id: "#input_38", errorName: "ErrorMessage_PIDExists" },
+  studentId:  { id: "#input_53", errorName: "ErrorMessage_SIDExists" }
 };
 
-// Hàm hiển thị field báo lỗi (Jotform sẽ tự show nếu bỏ hidden)
 function showErrorField(uniqueName) {
   const el = document.querySelector(`[name="${uniqueName}"]`);
-  if (el) {
-    const wrapper = el.closest(".form-line");
-    if (wrapper) wrapper.style.display = "block";
-  }
+  if (el) el.closest(".form-line").style.display = "block";
 }
-
-// Hàm ẩn field báo lỗi
 function hideErrorField(uniqueName) {
   const el = document.querySelector(`[name="${uniqueName}"]`);
-  if (el) {
-    const wrapper = el.closest(".form-line");
-    if (wrapper) wrapper.style.display = "none";
-  }
+  if (el) el.closest(".form-line").style.display = "none";
 }
-
-// Gắn listener để ẩn lỗi khi sửa field
 Object.values(FIELD_MAP).forEach(f => {
   const input = document.querySelector(f.id);
   if (input) {
@@ -926,18 +926,23 @@ Object.values(FIELD_MAP).forEach(f => {
   }
 });
 
-// Hàm kiểm tra trùng qua API
 async function checkExists(payload) {
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  return res.json();
+  document.getElementById("loadingSpinner").style.display = "inline-block";
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    return await res.json();
+  } finally {
+    document.getElementById("loadingSpinner").style.display = "none";
+  }
 }
 
-// Bắt sự kiện click nút Next bằng wildcard
 document.querySelectorAll('[id^="form-pagebreak-next_"]').forEach(btn => {
+  btn.insertAdjacentHTML("afterend", '<span id="loadingSpinner"></span>');
+
   btn.addEventListener("click", async (e) => {
     const btnId = btn.id;
 
@@ -946,7 +951,7 @@ document.querySelectorAll('[id^="form-pagebreak-next_"]').forEach(btn => {
       e.preventDefault();
 
       const emailVal = document.querySelector(FIELD_MAP.email.id)?.value.trim();
-      const pidVal = document.querySelector(FIELD_MAP.personalId.id)?.value.trim();
+      const pidVal   = document.querySelector(FIELD_MAP.personalId.id)?.value.trim();
 
       const result = await checkExists({ email: emailVal, personalId: pidVal });
 
@@ -961,7 +966,7 @@ document.querySelectorAll('[id^="form-pagebreak-next_"]').forEach(btn => {
       }
 
       if (!hasError) {
-        btn.click(); // cho phép sang trang tiếp
+        Jotform.nextPage(); // sang trang tiếp
       }
     }
 
@@ -976,12 +981,13 @@ document.querySelectorAll('[id^="form-pagebreak-next_"]').forEach(btn => {
       if (result.studentIdExists) {
         showErrorField(FIELD_MAP.studentId.errorName);
       } else {
-        btn.click(); // cho phép sang trang tiếp
+        Jotform.nextPage();
       }
     }
   });
 });
 </script>
+
 
 
 
