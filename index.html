@@ -954,7 +954,6 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       payload[f.flag.replace(/Exists$/, '')] = val;
     });
 
-    // Nếu tất cả đều trống → không gọi Worker, không hiện lỗi
     if (Object.values(payload).every(v => !v)) {
       visible.forEach(f => showJotFormError(f, false));
       toggleAction(true);
@@ -1020,4 +1019,5 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   });
 })();
 </script>
+
 
