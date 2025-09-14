@@ -887,81 +887,97 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
   const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
 
-  // map mỗi field với input ID, lỗi <li> ID, flag từ Worker & page index
+  // cấu hình 3 field
   const fields = [
     { id: 'input_3',  errId: 'id_92', flag: 'emailExists',      page: 2 },
     { id: 'input_38', errId: 'id_93', flag: 'personalIdExists', page: 2 },
     { id: 'input_53', errId: 'id_94', flag: 'studentIdExists',  page: 3 }
   ];
 
-  // debounce helper
   function debounce(fn, ms = 300) {
     let t;
-    return (...a) => {
+    return (...args) => {
       clearTimeout(t);
-      t = setTimeout(() => fn(...a), ms);
+      t = setTimeout(()=>fn(...args), ms);
     };
   }
 
-  // style y chang JotForm “required” error
-  function showDuplicateError(f, show) {
-    const liField = document.getElementById(f.id).closest('li');
-    const inp     = document.getElementById(f.id);
-    const errLi   = document.getElementById(f.errId);
+  // Hiện / ẩn error y chang “This field is required”
+  function showJotFormError(f, show) {
+    const inp   = document.getElementById(f.id);
+    if (!inp) return;
+    const lineLi = inp.closest('li.form-line');
+    if (!lineLi) return;
+
+    // Lấy hoặc tạo container .form-error-message
+    let errDiv = lineLi.querySelector('.form-error-message');
+    if (!errDiv) {
+      errDiv = document.createElement('div');
+      errDiv.className = 'form-error-message';
+      errDiv.id = 'error_' + f.id;
+      inp.insertAdjacentElement('afterend', errDiv);
+    }
 
     if (show) {
-      liField.classList.add('form-line-error');
+      // set text từ <li id="id_9x"> mà bạn đã tạo
+      const customText = document
+        .getElementById(f.errId)
+        .querySelector('.form-html')
+        .textContent
+        .trim();
+      errDiv.textContent = customText;
+
+      // gắn class JotForm
+      lineLi.classList.add('form-line-error');
       inp.classList.add('form-validation-error');
-      errLi.classList.remove('always-hidden','form-field-hidden');
-      errLi.style.display = '';
     } else {
-      liField.classList.remove('form-line-error');
+      // remove class + xóa text
+      lineLi.classList.remove('form-line-error');
       inp.classList.remove('form-validation-error');
-      errLi.classList.add('always-hidden','form-field-hidden');
-      errLi.style.display = 'none';
+      errDiv.textContent = '';
     }
   }
 
-  // bật/tắt Next/Submit
+  // enable/disable Next or Submit
   function toggleAction(disabled) {
     document.querySelectorAll(
       '.form-pagebreak-next, button[type="submit"], input[type="submit"]'
-    ).forEach(btn => {
-      if (btn.offsetParent !== null) btn.disabled = disabled;
+    ).forEach(b=>{
+      if (b.offsetParent !== null) b.disabled = disabled;
     });
   }
 
-  // phát hiện page hiện tại
+  // tìm page hiện tại
   function getCurrentPage() {
     const pages = document.querySelectorAll('.form-pagebreak-page');
-    for (let i = 0; i < pages.length; i++) {
-      if (pages[i].style.display !== 'none') return i + 1;
+    for (let i=0; i<pages.length; i++) {
+      if (pages[i].style.display !== 'none') return i+1;
     }
     return null;
   }
 
-  // core validation
+  // gọi Worker + cập nhật UI
   async function runValidation() {
     const page = getCurrentPage();
 
-    // nếu không phải page 2/3 → remove tất cả error, enable nút
+    // nếu không phải page 2 hoặc 3 → clear all
     if (page !== 2 && page !== 3) {
-      fields.forEach(f => showDuplicateError(f, false));
+      fields.forEach(f => showJotFormError(f, false));
       toggleAction(false);
       return;
     }
 
-    // chỉ payload cho các field trên page đó
+    // build payload cho page đó
     const visible = fields.filter(f => f.page === page);
     const payload = {};
     visible.forEach(f => {
       const v = document.getElementById(f.id)?.value.trim() || '';
-      payload[f.flag.replace(/Exists$/,'')] = v;
+      payload[f.flag.replace(/Exists$/, '')] = v;
     });
 
-    // nếu blank → hide error + disable Next
-    if (Object.values(payload).every(x => !x)) {
-      visible.forEach(f => showDuplicateError(f, false));
+    // blank → hide + block
+    if (Object.values(payload).every(v=>!v)) {
+      visible.forEach(f => showJotFormError(f, false));
       toggleAction(true);
       return;
     }
@@ -976,44 +992,46 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       });
       result = await res.json();
       console.log('📥 worker ↩︎', result);
-    } catch (e) {
+    } catch(e) {
       console.error('Worker error', e);
       toggleAction(true);
       return;
     }
 
-    // show/hide duplicate error & disable if có lỗi
+    // hiển thị lỗi duplicate như required
     let hasError = false;
     visible.forEach(f => {
       const exists = !!result[f.flag];
-      showDuplicateError(f, exists);
+      showJotFormError(f, exists);
       if (exists) hasError = true;
     });
     toggleAction(hasError);
   }
 
-  // debounce wrapper
   const deb = debounce(runValidation, 300);
 
-  // gắn listeners khi form fully loaded
   window.addEventListener('load', () => {
-    const check = setInterval(() => {
-      if (fields.some(f => document.getElementById(f.id))) {
-        clearInterval(check);
-
-        document.body.addEventListener('input', e => {
-          if (fields.map(f => f.id).includes(e.target.id)) deb();
+    // đợi form cắm xong
+    const chk = setInterval(()=>{
+      if (fields.some(f=>document.getElementById(f.id))) {
+        clearInterval(chk);
+        // lắng nghe input
+        document.body.addEventListener('input', e=>{
+          if (fields.map(f=>f.id).includes(e.target.id)) deb();
         });
-        document.body.addEventListener('click', e => {
+        // lắng nghe click Next/Submit
+        document.body.addEventListener('click', e=>{
           if (e.target.closest('.form-pagebreak-next, button[type="submit"], input[type="submit"]')) {
-            setTimeout(runValidation, 0);
+            setTimeout(runValidation,0);
           }
         });
-
         runValidation();
       }
     }, 100);
   });
 })();
 </script>
+
+
+
 
