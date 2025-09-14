@@ -933,33 +933,36 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     };
   };
 
-  // Đợi form render xong (chờ #input_3 xuất hiện)
+  // Chờ form render xong (element #input_3 xuất hiện)
   function onFormReady(cb) {
-    if (document.querySelector('#input_3')) cb();
-    else setTimeout(() => onFormReady(cb), 100);
+    if (document.querySelector('#input_3')) {
+      cb();
+    } else {
+      setTimeout(() => onFormReady(cb), 100);
+    }
   }
 
   onFormReady(() => {
-    // Các field và error message elements
-    const emailEl    = document.querySelector('#input_3');
-    const pidEl      = document.querySelector('#input_38');
-    const sidEl      = document.querySelector('#input_53');
-    const emailErr   = document.querySelector('[name="ErrorMessage_EmailExists"]');
-    const pidErr     = document.querySelector('[name="ErrorMessage_PIDExists"]');
-    const sidErr     = document.querySelector('[name="ErrorMessage_SIDExists"]');
+    // --------------- Tham chiếu các element ---------------
+    const emailEl   = document.querySelector('#input_3');
+    const pidEl     = document.querySelector('#input_38');
+    const sidEl     = document.querySelector('#input_53');
 
-    // Chỉ select nút Next trang 2, Next trang 3 và nút Submit cuối
-    const next2      = document.querySelector('#form-pagebreak-next_39');
-    const next3      = document.querySelector('#form-pagebreak-next_55');
-    const submitBtn  = document.querySelector('button[type="submit"], input[type="submit"]');
-    const actionBtns = [next2, next3, submitBtn].filter(Boolean);
+    const emailErr  = document.querySelector('[name="ErrorMessage_EmailExists"]');
+    const pidErr    = document.querySelector('[name="ErrorMessage_PIDExists"]');
+    const sidErr    = document.querySelector('[name="ErrorMessage_SIDExists"]');
 
-    // Ban đầu: ẩn error + disable tất cả actionBtns
-    [emailErr, pidErr, sidErr].forEach(el => { if (el) el.style.display = 'none'; });
-    actionBtns.forEach(btn => btn.disabled = true);
+    const next2     = document.querySelector('#form-pagebreak-next_39');
+    const next3     = document.querySelector('#form-pagebreak-next_55');
+    const submitBtn = document.querySelector('button[type="submit"], input[type="submit"]');
+    const actionButtons = [ next2, next3, submitBtn ].filter(Boolean);
 
-    // Chặn click nếu btn.disabled
-    actionBtns.forEach(btn => {
+    // Ẩn lỗi và disable nút ban đầu
+    [ emailErr, pidErr, sidErr ].forEach(el => el && (el.style.display = 'none'));
+    actionButtons.forEach(btn => btn.disabled = true);
+
+    // Chặn click nếu disabled
+    actionButtons.forEach(btn => {
       btn.addEventListener('click', e => {
         if (btn.disabled) {
           e.preventDefault();
@@ -968,7 +971,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       });
     });
 
-    // Đưa lên worker và xử lý response
+    // --------------- Hàm gọi Worker và update UI ---------------
     async function runValidation() {
       const payload = {
         email:      emailEl.value.trim(),
@@ -976,10 +979,10 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
         studentId:  sidEl.value.trim()
       };
 
-      // Nếu 3 field đều rỗng → ẩn error + disable Next2/Next3/Submit
+      // Nếu cả 3 rỗng → reset all
       if (!payload.email && !payload.personalId && !payload.studentId) {
-        [emailErr, pidErr, sidErr].forEach(el => { if (el) el.style.display = 'none'; });
-        actionBtns.forEach(btn => btn.disabled = true);
+        [ emailErr, pidErr, sidErr ].forEach(el => el && (el.style.display = 'none'));
+        actionButtons.forEach(btn => btn.disabled = true);
         return;
       }
 
@@ -991,26 +994,26 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
         });
         const { emailExists, personalIdExists, studentIdExists } = await res.json();
 
-        // Show/hide error messages
+        // Show / hide từng message
         if (emailErr) emailErr.style.display = emailExists ? 'block' : 'none';
         if (pidErr)   pidErr.style.display   = personalIdExists ? 'block' : 'none';
         if (sidErr)   sidErr.style.display   = studentIdExists  ? 'block' : 'none';
 
-        // Disable nếu có lỗi nào
+        // Disable nếu có bất kỳ lỗi
         const hasError = emailExists || personalIdExists || studentIdExists;
-        actionBtns.forEach(btn => btn.disabled = hasError);
+        actionButtons.forEach(btn => btn.disabled = hasError);
 
-      } catch {
-        // Network error → lock lại để an toàn
-        actionBtns.forEach(btn => btn.disabled = true);
+      } catch (err) {
+        // Nếu network/API lỗi → khóa nút tạm thời
+        actionButtons.forEach(btn => btn.disabled = true);
       }
     }
 
-    // Debounce trước khi gọi runValidation
+    // Debounce listener
     const debouncedValidate = debounce(runValidation, 500);
 
-    // Gắn listener input
-    [emailEl, pidEl, sidEl].forEach(el => {
+    // Gắn input listener
+    [ emailEl, pidEl, sidEl ].forEach(el => {
       if (el) el.addEventListener('input', debouncedValidate);
     });
 
@@ -1019,6 +1022,9 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   });
 })();
 </script>
+
+
+
 
 
 
