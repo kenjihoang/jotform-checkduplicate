@@ -881,6 +881,16 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 <link id=color-scheme-style href="https://cdn.jotfor.ms/stylebuilder/static/color-scheme.css?v=3.3.65438" type="text/css" rel="stylesheet" /></body>
 </html><script type="text/javascript">JotForm.ownerView=true;</script><script type="text/javascript">JotForm.isNewSACL=true;</script>
 
+<style>
+  .form-error-message.fade-in {
+    animation: fadeIn 0.3s ease-in-out;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+</style>
+
 <script>
 ;(function(){
   const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
@@ -914,10 +924,14 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     if (show) {
       const customText = document.getElementById(f.errId)?.innerText?.trim() || 'Duplicate entry';
       errBox.textContent = customText;
+      errBox.classList.add('fade-in');
       line.classList.add('form-line-error');
       input.classList.add('form-validation-error');
     } else {
-      if (errBox) errBox.textContent = '';
+      if (errBox) {
+        errBox.textContent = '';
+        errBox.classList.remove('fade-in');
+      }
       line.classList.remove('form-line-error');
       input.classList.remove('form-validation-error');
     }
@@ -941,6 +955,8 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
   async function runValidation() {
     const page = getCurrentPage();
+    console.log('🚦 runValidation on page', page);
+
     if (page !== 2 && page !== 3) {
       fields.forEach(f => showJotFormError(f, false));
       toggleAction(false);
@@ -955,11 +971,13 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
 
     if (Object.values(payload).every(v => !v)) {
+      console.log('⚠️ All fields blank, skipping Worker');
       visible.forEach(f => showJotFormError(f, false));
       toggleAction(true);
       return;
     }
 
+    console.log('📡 payload →', payload);
     let result = {};
     try {
       const res = await fetch(workerUrl, {
@@ -968,8 +986,9 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
         body: JSON.stringify(payload)
       });
       result = await res.json();
+      console.log('📥 worker ↩︎', result);
     } catch (e) {
-      console.error('Worker error', e);
+      console.error('❌ Worker error', e);
       toggleAction(true);
       return;
     }
