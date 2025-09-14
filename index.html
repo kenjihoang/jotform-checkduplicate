@@ -1054,20 +1054,29 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
     mo.observe(document.body, { childList: true, subtree: true });
   });
-	window.addEventListener("message", function(e) {
-      if (e.data.type === "SOURCE_FORM_HEIGHT") {
-        parent.postMessage(e.data, "*");
+	
+
+	function sendHeight() {
+        // Lấy tổng chiều cao nội dung
+        var h = document.documentElement.scrollHeight;
+        parent.postMessage({
+          type: 'SOURCE_FORM_HEIGHT',
+          height: h
+        }, '*');
       }
-    });
-	window.addEventListener("message", function(e) {
-  if (e.origin.includes("jotform") && e.data.type==="setHeight") {
-    // Resize inner iframe
-    var inner = document.querySelector('iframe[id^="JotFormIFrame"]');
-    if (inner) inner.style.height = e.data.height + "px";
-    // Forward message lên parent (WordPress)
-    parent.postMessage({ type:"GH_PAGE_HEIGHT", height:e.data.height }, "*");
-  }
-}, false);
+
+      // Khi load xong, gửi height
+      window.addEventListener('load', sendHeight);
+
+      // Quan sát mọi thay đổi DOM để cập nhật height
+      if ('ResizeObserver' in window) {
+        new ResizeObserver(sendHeight).observe(document.body);
+      } else {
+        var mo = new MutationObserver(sendHeight);
+        mo.observe(document.body, { childList:true, subtree:true, attributes:true });
+      }
+    })();
+
 
 
 
@@ -1075,6 +1084,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
 	
 </script>
+
 
 
 
