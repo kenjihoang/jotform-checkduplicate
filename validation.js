@@ -1,14 +1,16 @@
 ;(function(){
   'use strict';
 
+  // ==== CẤU HÌNH ====
   const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
+  const formId    = '252484373306054';  // chỉ số form, ví dụ '123456789012345'
   const fields = [
     { id: 'input_3',  errId: 'id_92', flag: 'emailExists'      },
     { id: 'input_38', errId: 'id_93', flag: 'personalIdExists'},
     { id: 'input_53', errId: 'id_94', flag: 'studentIdExists' }
   ];
 
-  // 1) Xóa lỗi đỏ mặc định của JotForm trên các field track
+  // ==== HỖ TRỢ UI ====
   function clearDefaultErrors() {
     fields.forEach(f => {
       const inp = document.getElementById(f.id);
@@ -20,7 +22,6 @@
     });
   }
 
-  // 2) Debounce helper
   function debounce(fn, ms = 300) {
     let timer;
     return (...args) => {
@@ -29,7 +30,6 @@
     };
   }
 
-  // 3) Hiển thị/ẩn lỗi duplicate giống hệt required
   function showDuplicateError(f, show) {
     const inp = document.getElementById(f.id);
     const li  = inp?.closest('li.form-line');
@@ -45,8 +45,8 @@
         box.className = 'form-error-message fade-in';
         inp.insertAdjacentElement('afterend', box);
       }
-      const txt = document.getElementById(f.errId)?.innerText.trim() || 'Duplicate entry';
-      box.textContent = txt;
+      const msg = document.getElementById(f.errId)?.innerText.trim() || 'Duplicate entry';
+      box.textContent = msg;
       li.classList.add('form-line-error');
       inp.classList.add('form-validation-error');
     } else if (box) {
@@ -56,7 +56,6 @@
     }
   }
 
-  // 4) Enable/disable Next & Submit
   function toggleAction(disabled) {
     document.querySelectorAll(
       '.form-pagebreak-next, button[type="submit"], input[type="submit"]'
@@ -65,7 +64,7 @@
     });
   }
 
-  // 5) Chạy kiểm tra duplicate
+  // ==== XỬ LÝ VALIDATION & DUPLICATE-CHECK ====
   async function runValidation() {
     const visible = fields.filter(f => {
       const inp = document.getElementById(f.id);
@@ -113,78 +112,64 @@
 
   const debouncedRun = debounce(runValidation, 300);
 
-  // 6) Gắn listener & block space
+  // ==== GẮN LISTENER ====
   function attachListeners() {
-    // input debounce
+    // debounce on input
     document.body.addEventListener('input', e => {
       if (fields.some(f => f.id === e.target.id)) debouncedRun();
     });
-    // blur (khi click ra ngoài)
+    // blur → validate
     document.body.addEventListener('blur', e => {
       if (fields.some(f => f.id === e.target.id)) runValidation();
     }, true);
-    // Next/Submit click
+    // next/submit click
     document.body.addEventListener('click', e => {
       if (e.target.closest('.form-pagebreak-next, button[type="submit"], input[type="submit"]')) {
         setTimeout(runValidation, 0);
       }
     });
 
-    // chặn space & strip khoảng trắng khi paste cho cả 3 field
+    // block Space + strip whitespace on paste
     fields.forEach(f => {
       const inp = document.getElementById(f.id);
-      if (inp) {
-        inp.addEventListener('keypress', e => {
-          if (e.key === ' ') e.preventDefault();
-        });
-        inp.addEventListener('paste', () => {
-          setTimeout(() => {
-            inp.value = inp.value.replace(/\s+/g, '');
-          }, 0);
-        });
-      }
+      if (!inp) return;
+      inp.addEventListener('keypress', e => {
+        if (e.key === ' ') e.preventDefault();
+      });
+      inp.addEventListener('paste', () => {
+        setTimeout(() => {
+          inp.value = inp.value.replace(/\s+/g, '');
+        }, 0);
+      });
     });
   }
 
-  // 7) Khởi chạy khi form render xong
-  document.addEventListener('DOMContentLoaded', () => {
-    const mo = new MutationObserver((_, obs) => {
-      if (fields.every(f => document.getElementById(f.id))) {
-        obs.disconnect();
-        clearDefaultErrors();
-        attachListeners();
-        runValidation();
+  // ==== AUTO-RESIZE JOTFORM IFRAME ====
+  window.addEventListener('message', function(e) {
+    if (
+      typeof e.data === 'object' &&
+      e.origin.includes('jotform') &&
+      (e.data.type === 'setHeight' || e.data.height)
+    ) {
+      const h = e.data.height || e.data.messages?.setHeight;
+      const iframe = document.getElementById('JotFormIFrame-' + formId);
+      if (iframe && h && !isNaN(h)) {
+        iframe.style.height = h + 'px';
       }
-    });
-    mo.observe(document.body, { childList: true, subtree: true });
-  });
+    }
+  }, false);
 
-  // -- Hàm init chỉ chạy khi form đã hiện đủ các field --
+  // ==== KHỞI CHẠY KHI FORM SẴN SÀNG ====
   function initWhenReady() {
-    const f3 = document.getElementById('input_3');
-    const f38 = document.getElementById('input_38');
-    const f53 = document.getElementById('input_53');
-    if (f3 && f38 && f53) {
+    if (fields.every(f => document.getElementById(f.id))) {
       clearDefaultErrors();
       attachListeners();
       runValidation();
     } else {
-      // nếu chưa xong, thử lại sau 100ms
       setTimeout(initWhenReady, 100);
     }
   }
 
-  // Khởi động polling
   initWhenReady();
-
-window.addEventListener("message", function(e) {
-    if (e.origin.indexOf("jotform") > -1 && e.data.type === "setHeight") {
-      const id = "JotFormIFrame-" + 252484373306054;
-      const iframe = document.getElementById(id);
-      if (iframe) {
-        iframe.style.height = e.data.height + "px";
-      }
-    }
-  }, false);
 
 })();
