@@ -924,7 +924,6 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
 <script>
   ;(function(){
-    // Endpoint Cloudflare Worker của bạn
     const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
 
     // Debounce helper
@@ -936,7 +935,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       };
     }
 
-    // Định nghĩa các field và thẻ error tương ứng
+    // Map mỗi field với thẻ error tương ứng
     const config = [
       {
         inputEl: document.querySelector('#input_3'),                          // email
@@ -952,22 +951,21 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       }
     ];
 
-    // Tất cả nút Next (pagebreak) và nút Submit cuối cùng
+    // Chỉ lấy nút Next của page 2, page 3 và nút Submit cuối
     const actionButtons = [
-      ...document.querySelectorAll('[id^="form-pagebreak-next_"]'),
+      document.querySelector('#form-pagebreak-next_39'),
+      document.querySelector('#form-pagebreak-next_55'),
       document.querySelector('button[type="submit"], input[type="submit"]')
     ].filter(Boolean);
 
-    // Ẩn tất cả error, disable buttons ngay từ đầu
+    // Ẩn toàn bộ error + disable những nút này ban đầu
     config.forEach(c => { if (c.errorEl) c.errorEl.style.display = 'none'; });
-    actionButtons.forEach(btn => { btn.disabled = true; });
+    actionButtons.forEach(btn => btn.disabled = true);
 
-    // Hàm bật/tắt Next & Submit
     function setActionsDisabled(disabled) {
-      actionButtons.forEach(btn => { btn.disabled = disabled; });
+      actionButtons.forEach(btn => btn.disabled = disabled);
     }
 
-    // Hàm gọi Worker, xử lý kết quả
     async function runValidation() {
       const payload = {
         email:      config[0].inputEl?.value.trim() || '',
@@ -975,7 +973,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
         studentId:  config[2].inputEl?.value.trim() || ''
       };
 
-      // Nếu chưa nhập gì → ẩn error + disable
+      // Nếu chưa nhập gì → ẩn message + disable only page2&3+submit
       if (!payload.email && !payload.personalId && !payload.studentId) {
         config.forEach(c => { if (c.errorEl) c.errorEl.style.display = 'none'; });
         setActionsDisabled(true);
@@ -990,24 +988,23 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
         });
         const json = await res.json();
 
-        // Show/hide từng message
-        if (config[0].errorEl) config[0].errorEl.style.display = json.emailExists      ? 'block' : 'none';
-        if (config[1].errorEl) config[1].errorEl.style.display = json.personalIdExists ? 'block' : 'none';
-        if (config[2].errorEl) config[2].errorEl.style.display = json.studentIdExists  ? 'block' : 'none';
+        // Show/hide error
+        if (config[0].errorEl) config[0].errorEl.style.display = json.emailExists       ? 'block' : 'none';
+        if (config[1].errorEl) config[1].errorEl.style.display = json.personalIdExists  ? 'block' : 'none';
+        if (config[2].errorEl) config[2].errorEl.style.display = json.studentIdExists   ? 'block' : 'none';
 
-        // Disable nếu có bất kỳ lỗi
+        // Disable chỉ nếu có lỗi
         const hasError = json.emailExists || json.personalIdExists || json.studentIdExists;
         setActionsDisabled(hasError);
-
-      } catch (err) {
-        // Lỗi mạng → tạm disable để an toàn
+      } catch {
+        // Lỗi network → disable an toàn
         setActionsDisabled(true);
       }
     }
 
     const debouncedValidate = debounce(runValidation, 500);
 
-    // Chặn click lên nút đang disabled
+    // Chặn click khi disabled
     function blockDisabledClicks(btn) {
       btn.addEventListener('click', e => {
         if (btn.disabled) {
@@ -1017,20 +1014,21 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       });
     }
 
-    // Khởi tạo khi form load xong
+    // Khi form load xong
     window.addEventListener('DOMContentLoaded', () => {
-      // Gắn event input → validate
+      // Gắn event input chỉ lên 3 field để validate
       config.forEach(c => {
         if (c.inputEl) c.inputEl.addEventListener('input', debouncedValidate);
       });
 
-      // Chặn click trên tất cả action buttons khi disabled
+      // Chặn click cho page2, page3 Next và Submit khi disabled
       actionButtons.forEach(blockDisabledClicks);
 
-      // Chạy lần đầu để set trạng thái button
+      // Chạy lần đầu để set trạng thái nút chính xác
       runValidation();
     });
   })();
   </script>
+
 
 
