@@ -881,47 +881,6 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 <link id=color-scheme-style href="https://cdn.jotfor.ms/stylebuilder/static/color-scheme.css?v=3.3.65438" type="text/css" rel="stylesheet" /></body>
 </html><script type="text/javascript">JotForm.ownerView=true;</script><script type="text/javascript">JotForm.isNewSACL=true;</script>
 
-<style>
-/* Spinner style */
-#loadingSpinner {
-  display: none;
-  margin-left: 10px;
-}
-#loadingSpinner::after {
-  content: "";
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  border: 2px solid #ccc;
-  border-top-color: #333;
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-</style>
-
-<style>
-#loadingSpinner {
-  display: none;
-  margin-left: 10px;
-}
-#loadingSpinner::after {
-  content: "";
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  border: 2px solid #ccc;
-  border-top-color: #333;
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-</style>
-
 <script>
 ;(function(){
   const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
@@ -933,95 +892,89 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     };
   };
 
-  // Chờ form render xong (element #input_3 xuất hiện)
-  function onFormReady(cb) {
-    if (document.querySelector('#input_3')) {
-      cb();
-    } else {
-      setTimeout(() => onFormReady(cb), 100);
+  // Lấy luôn nút Next/Submit đang hiển thị trên page
+  function getActionButtons() {
+    return [
+      ...document.querySelectorAll('[id^="form-pagebreak-next_"]'),
+      document.querySelector('button[type="submit"], input[type="submit"]')
+    ]
+    .filter(btn => btn && btn.offsetParent !== null);
+  }
+
+  // Hàm validate: query lại input, error message, gọi Worker, show/hide + disable nút
+  async function runValidation() {
+    const emailEl  = document.querySelector('#input_3');
+    const pidEl    = document.querySelector('#input_38');
+    const sidEl    = document.querySelector('#input_53');
+    if (!emailEl || !pidEl || !sidEl) return;
+
+    // những thẻ error message bạn phải check lại selector cho đúng
+    const emailErr = document.querySelector('[name="ErrorMessage_EmailExists"]');
+    const pidErr   = document.querySelector('[name="ErrorMessage_PIDExists"]');
+    const sidErr   = document.querySelector('[name="ErrorMessage_SIDExists"]');
+
+    const payload = {
+      email:      emailEl.value.trim(),
+      personalId: pidEl.value.trim(),
+      studentId:  sidEl.value.trim()
+    };
+
+    // nếu cả ba rỗng → reset ui + lock
+    if (!payload.email && !payload.personalId && !payload.studentId) {
+      [emailErr, pidErr, sidErr].forEach(el => el && (el.style.display = 'none'));
+      getActionButtons().forEach(btn => btn.disabled = true);
+      return;
+    }
+
+    try {
+      const res = await fetch(workerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const { emailExists, personalIdExists, studentIdExists } = await res.json();
+
+      // show / hide error
+      emailErr && (emailErr.style.display = emailExists ? 'block' : 'none');
+      pidErr   && (pidErr.style.display   = personalIdExists ? 'block' : 'none');
+      sidErr   && (sidErr.style.display   = studentIdExists ? 'block' : 'none');
+
+      // disable nếu có ít nhất 1 lỗi
+      const hasError = emailExists || personalIdExists || studentIdExists;
+      getActionButtons().forEach(btn => btn.disabled = hasError);
+
+    } catch (err) {
+      // network/API lỗi → tạm lock
+      getActionButtons().forEach(btn => btn.disabled = true);
     }
   }
 
-  onFormReady(() => {
-    // --------------- Tham chiếu các element ---------------
-    const emailEl   = document.querySelector('#input_3');
-    const pidEl     = document.querySelector('#input_38');
-    const sidEl     = document.querySelector('#input_53');
+  const debouncedValidate = debounce(runValidation, 500);
 
-    const emailErr  = document.querySelector('[name="ErrorMessage_EmailExists"]');
-    const pidErr    = document.querySelector('[name="ErrorMessage_PIDExists"]');
-    const sidErr    = document.querySelector('[name="ErrorMessage_SIDExists"]');
-
-    const next2     = document.querySelector('#form-pagebreak-next_39');
-    const next3     = document.querySelector('#form-pagebreak-next_55');
-    const submitBtn = document.querySelector('button[type="submit"], input[type="submit"]');
-    const actionButtons = [ next2, next3, submitBtn ].filter(Boolean);
-
-    // Ẩn lỗi và disable nút ban đầu
-    [ emailErr, pidErr, sidErr ].forEach(el => el && (el.style.display = 'none'));
-    actionButtons.forEach(btn => btn.disabled = true);
-
-    // Chặn click nếu disabled
-    actionButtons.forEach(btn => {
-      btn.addEventListener('click', e => {
-        if (btn.disabled) {
-          e.preventDefault();
-          btn.focus();
-        }
-      });
+  function init() {
+    // 1. Gắn input listener (sẽ bắt input trên bất kỳ page nào)
+    document.body.addEventListener('input', e => {
+      if (['input_3','input_38','input_53'].includes(e.target.id)) {
+        debouncedValidate();
+      }
     });
 
-    // --------------- Hàm gọi Worker và update UI ---------------
-    async function runValidation() {
-      const payload = {
-        email:      emailEl.value.trim(),
-        personalId: pidEl.value.trim(),
-        studentId:  sidEl.value.trim()
-      };
-
-      // Nếu cả 3 rỗng → reset all
-      if (!payload.email && !payload.personalId && !payload.studentId) {
-        [ emailErr, pidErr, sidErr ].forEach(el => el && (el.style.display = 'none'));
-        actionButtons.forEach(btn => btn.disabled = true);
-        return;
+    // 2. Bắt page-break click để rerun ngay khi page thay đổi
+    document.body.addEventListener('click', e => {
+      if (e.target.matches('[id^="form-pagebreak-next_"]')) {
+        // cho time 0 để form load page mới xong
+        setTimeout(runValidation, 0);
       }
-
-      try {
-        const res  = await fetch(workerUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        const { emailExists, personalIdExists, studentIdExists } = await res.json();
-
-        // Show / hide từng message
-        if (emailErr) emailErr.style.display = emailExists ? 'block' : 'none';
-        if (pidErr)   pidErr.style.display   = personalIdExists ? 'block' : 'none';
-        if (sidErr)   sidErr.style.display   = studentIdExists  ? 'block' : 'none';
-
-        // Disable nếu có bất kỳ lỗi
-        const hasError = emailExists || personalIdExists || studentIdExists;
-        actionButtons.forEach(btn => btn.disabled = hasError);
-
-      } catch (err) {
-        // Nếu network/API lỗi → khóa nút tạm thời
-        actionButtons.forEach(btn => btn.disabled = true);
-      }
-    }
-
-    // Debounce listener
-    const debouncedValidate = debounce(runValidation, 500);
-
-    // Gắn input listener
-    [ emailEl, pidEl, sidEl ].forEach(el => {
-      if (el) el.addEventListener('input', debouncedValidate);
     });
 
-    // Chạy lần đầu để set trạng thái nút chính xác
+    // 3. Test lần đầu (để page1 / page2 hiện ra đều lock đúng)
     runValidation();
-  });
+  }
+
+  window.addEventListener('DOMContentLoaded', init);
 })();
 </script>
+
 
 
 
