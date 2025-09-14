@@ -887,40 +887,41 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
   const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
 
-  // Map each field to its input ID, error selector, what page it's on, and which flag Worker returns
+  // Khai báo 3 field cần track
   const fields = [
-    { id: 'input_3',  name: 'email',      errSel: '[name="ErrorMessage_EmailExists"]',   page: 2, flag: 'emailExists' },
-    { id: 'input_38', name: 'personalId', errSel: '[name="ErrorMessage_PIDExists"]',     page: 2, flag: 'personalIdExists' },
-    { id: 'input_53', name: 'studentId',  errSel: '[name="ErrorMessage_SIDExists"]',     page: 3, flag: 'studentIdExists' }
+    { id: 'input_3',  name: 'email',      errSel: '[name="ErrorMessage_EmailExists"]',   flag: 'emailExists'      },
+    { id: 'input_38', name: 'personalId', errSel: '[name="ErrorMessage_PIDExists"]',     flag: 'personalIdExists' },
+    { id: 'input_53', name: 'studentId',  errSel: '[name="ErrorMessage_SIDExists"]',     flag: 'studentIdExists'  }
   ];
 
-  // Utility: disable/enable the visible Next or Submit button
+  // Debounce helper
+  function debounce(fn, ms = 400) {
+    let t;
+    return (...args) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn(...args), ms);
+    };
+  }
+
+  // Bật/tắt nút Next hoặc Submit đang visible
   function toggleAction(disabled) {
-    const buttons = Array.from(
-      document.querySelectorAll(
-        '.form-pagebreak-next, button[type="submit"], input[type="submit"]'
-      )
-    ).filter(btn => btn.offsetParent !== null);
-    buttons.forEach(btn => btn.disabled = disabled);
+    document.querySelectorAll(
+      '.form-pagebreak-next, button[type="submit"], input[type="submit"]'
+    ).forEach(btn => {
+      if (btn.offsetParent !== null) btn.disabled = disabled;
+    });
   }
 
-  // Utility: detect which page is currently visible
-  function getCurrentPage() {
-    const pages = document.querySelectorAll('.form-pagebreak-page');
-    for (let i = 0; i < pages.length; i++) {
-      if (pages[i].style.display !== 'none') {
-        return i + 1;  // pages are zero-indexed in DOM
-      }
-    }
-    return null;
-  }
-
-  // Core: fetch Worker and update UI
+  // Hàm gọi Worker và cập nhật UI
   async function runValidation() {
-    const page = getCurrentPage();
+    // 1) Tìm những field đang visible (trên page 2 hoặc 3)
+    const visible = fields.filter(f => {
+      const el = document.getElementById(f.id);
+      return el && el.offsetParent !== null;
+    });
 
-    // If not on page 2 or 3, clear any errors and enable Next/Submit
-    if (page !== 2 && page !== 3) {
+    // 2) Nếu none → reset lỗi và enable nút
+    if (visible.length === 0) {
       fields.forEach(f => {
         const err = document.querySelector(f.errSel);
         if (err) err.style.display = 'none';
@@ -929,17 +930,16 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       return;
     }
 
-    // Build payload only for fields on the active page
+    // 3) Build payload chỉ với những field visible
     const payload = {};
-    const pageFields = fields.filter(f => f.page === page);
-    pageFields.forEach(f => {
-      const input = document.getElementById(f.id);
-      payload[f.name] = input ? input.value.trim() : '';
+    visible.forEach(f => {
+      const val = document.getElementById(f.id).value.trim();
+      payload[f.name] = val;
     });
 
-    // If user hasn't typed anything yet, hide page errors and disable Next
-    if (Object.values(payload).every(v => v === '')) {
-      pageFields.forEach(f => {
+    // 4) Nếu chưa gõ gì → ẩn lỗi + block nút Next
+    if (Object.values(payload).every(v => !v)) {
+      visible.forEach(f => {
         const err = document.querySelector(f.errSel);
         if (err) err.style.display = 'none';
       });
@@ -947,76 +947,62 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       return;
     }
 
-    // Call your Worker
+    // 5) Gọi Worker
+    console.log('📡 Sending to worker:', payload);
     let result = {};
     try {
-      const res = await fetch(workerUrl, {
+      const resp = await fetch(workerUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      result = await res.json();
+      result = await resp.json();
+      console.log('📥 Worker response:', result);
     } catch (e) {
-      // On network/API error, block progression
+      console.error('Worker fetch error', e);
       toggleAction(true);
       return;
     }
 
-    // Show or hide each error, determine if any flag is true
+    // 6) Show/hide error & disable nút nếu có lỗi
     let hasError = false;
-    pageFields.forEach(f => {
+    visible.forEach(f => {
       const err = document.querySelector(f.errSel);
-      const exists = result[f.flag];
+      const exists = !!result[f.flag];
       if (err) err.style.display = exists ? 'block' : 'none';
       if (exists) hasError = true;
     });
-
     toggleAction(hasError);
   }
 
-  // Debounce utility to avoid hammering Worker on every keystroke
-  function debounce(fn, ms = 400) {
-    let t;
-    return (...args) => {
-      clearTimeout(t);
-      t = setTimeout(() => fn(...args), ms);
-    };
-  }
-  const debouncedRun = debounce(runValidation);
+  // 7) Gắn listener input + click pagebreak
+  const debRun = debounce(runValidation, 400);
 
-  // Attach listeners once form is fully rendered
-  function init() {
-    // 1. Listen for user input on each field
+  function attachListeners() {
     fields.forEach(f => {
-      const input = document.getElementById(f.id);
-      if (!input) return;
-      input.addEventListener('input', debouncedRun);
-      input.addEventListener('change', runValidation);
-      input.addEventListener('blur', runValidation);
+      const inp = document.getElementById(f.id);
+      if (!inp) return;
+      inp.addEventListener('input', debRun);
+      inp.addEventListener('blur', runValidation);
     });
 
-    // 2. Observe page-change via style mutation on each page container
-    document.querySelectorAll('.form-pagebreak-page').forEach(pageEl => {
-      new MutationObserver(muts => {
-        muts.forEach(m => {
-          if (m.attributeName === 'style') {
-            runValidation();
-          }
-        });
-      }).observe(pageEl, { attributes: true });
+    // Khi click Next hoặc Submit
+    document.addEventListener('click', e => {
+      if (e.target.closest('.form-pagebreak-next, button[type="submit"], input[type="submit"]')) {
+        // delay để form vừa chuyển page xong
+        setTimeout(runValidation, 0);
+      }
     });
-
-    // 3. Initial check
-    runValidation();
   }
 
-  // Wait for JotForm Full Source to insert all fields into DOM
-  document.addEventListener('DOMContentLoaded', () => {
-    const checkInterval = setInterval(() => {
-      // Wait until at least the first tracked input exists
-      if (document.getElementById(fields[0].id)) {
-        clearInterval(checkInterval);
-        init();
+  // 8) Chờ form load xong, then init
+  window.addEventListener('load', () => {
+    const wait = setInterval(() => {
+      // chờ đủ 3 input xuất hiện
+      if (fields.every(f => document.getElementById(f.id))) {
+        clearInterval(wait);
+        attachListeners();
+        runValidation();
       }
     }, 100);
   });
