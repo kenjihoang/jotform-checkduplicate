@@ -3,7 +3,7 @@
   console.log('[DBG] validation.js starting');
 
   const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
-  const formId    = 'YOUR_FORM_ID';
+  const formId    = '252484373306054';
   const fields = [
     { id: 'input_3',  errId: 'id_92', flag: 'emailExists'      },
     { id: 'input_38', errId: 'id_93', flag: 'personalIdExists'},
