@@ -898,49 +898,64 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
   const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
   const fields = [
-    { id: 'input_3',  errId: 'id_92', flag: 'emailExists',     page: 2 },
-    { id: 'input_38', errId: 'id_93', flag: 'personalIdExists',page: 2 },
-    { id: 'input_53', errId: 'id_94', flag: 'studentIdExists', page: 3 }
+    { id: 'input_3',  errId: 'id_92', flag: 'emailExists'      },
+    { id: 'input_38', errId: 'id_93', flag: 'personalIdExists'},
+    { id: 'input_53', errId: 'id_94', flag: 'studentIdExists' }
   ];
 
-  // Debounce
+  // Xóa lỗi required mặc định trên các field track
+  function clearDefaultErrors() {
+    fields.forEach(f => {
+      const inp = document.getElementById(f.id);
+      const li  = inp?.closest('li.form-line');
+      if (!li || !inp) return;
+      li.classList.remove('form-line-error');
+      inp.classList.remove('form-validation-error');
+      li.querySelectorAll('.form-error-message').forEach(el => {
+        // giữ lại error box custom có id="error_input_x"
+        if (!el.id.startsWith('error_')) el.remove();
+      });
+    });
+  }
+
+  // Debounce helper
   function debounce(fn, ms = 300) {
     let t;
-    return (...a) => {
+    return (...args) => {
       clearTimeout(t);
-      t = setTimeout(() => fn(...a), ms);
+      t = setTimeout(() => fn(...args), ms);
     };
   }
 
-  // Show hoặc hide lỗi duplicate ngay dưới input
+  // Show/Hide lỗi duplicate giống hệt required
   function showDuplicateError(f, show) {
-    const inp  = document.getElementById(f.id);
-    const line = inp?.closest('li.form-line');
-    if (!inp || !line) return;
+    const inp = document.getElementById(f.id);
+    const li  = inp?.closest('li.form-line');
+    if (!li || !inp) return;
 
-    // tìm div đã tạo, hoặc tạo mới khi cần
-    let box = line.querySelector(`.dup-error#dup_${f.id}`);
-    if (!box && show) {
-      box = document.createElement('div');
-      box.className = 'form-error-message dup-error fade-in';
-      box.id = 'dup_' + f.id;
-      inp.insertAdjacentElement('afterend', box);
-    }
+    const boxId = 'error_' + f.id;
+    let box = document.getElementById(boxId);
 
     if (show) {
-      // lấy text custom từ <li id="id_9x">, fallback "Duplicate entry"
+      if (!box) {
+        box = document.createElement('div');
+        box.id = boxId;
+        box.className = 'form-error-message fade-in';
+        inp.insertAdjacentElement('afterend', box);
+      }
       const text = document.getElementById(f.errId)?.innerText.trim() || 'Duplicate entry';
       box.textContent = text;
-      line.classList.add('form-line-error');
+
+      li.classList.add('form-line-error');
       inp.classList.add('form-validation-error');
-    } else {
-      if (box) box.textContent = '';
-      line.classList.remove('form-line-error');
+    } else if (box) {
+      box.remove();
+      li.classList.remove('form-line-error');
       inp.classList.remove('form-validation-error');
     }
   }
 
-  // Bật/tắt Next & Submit
+  // Enable/disable Next & Submit
   function toggleAction(disabled) {
     document.querySelectorAll(
       '.form-pagebreak-next, button[type="submit"], input[type="submit"]'
@@ -949,33 +964,31 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
   }
 
-  // Xác định page hiện tại
-  function getCurrentPage() {
-    const active = document.querySelector('.jfActive');
-    if (!active) return null;
-    const n = parseInt(active.textContent.trim(), 10);
-    return isNaN(n) ? null : n;
-  }
-
-  // Core validation
+  // Core: collect visible fields, call Worker, show errors
   async function runValidation() {
-    const page = getCurrentPage();
-    if (page !== 2 && page !== 3) {
+    // chỉ lấy các field đang hiện (offsetParent!==null)
+    const visible = fields.filter(f => {
+      const inp = document.getElementById(f.id);
+      return inp && inp.offsetParent !== null;
+    });
+
+    // nếu none → reset và bật nút
+    if (visible.length === 0) {
       fields.forEach(f => showDuplicateError(f, false));
       toggleAction(false);
       return;
     }
 
-    const vis = fields.filter(f => f.page === page);
+    // build payload
     const payload = {};
-    vis.forEach(f => {
-      payload[f.flag.replace(/Exists$/,'')] =
+    visible.forEach(f => {
+      payload[f.flag.replace(/Exists$/, '')] =
         document.getElementById(f.id).value.trim();
     });
 
-    // skip nếu blank
+    // nếu tất cả trống → hide errors + disable nút
     if (Object.values(payload).every(v => !v)) {
-      vis.forEach(f => showDuplicateError(f, false));
+      visible.forEach(f => showDuplicateError(f, false));
       toggleAction(true);
       return;
     }
@@ -985,50 +998,56 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     try {
       const res = await fetch(workerUrl, {
         method: 'POST',
-        headers: { 'Content-Type':'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       result = await res.json();
       console.log('📥 worker ↩︎', result);
-    } catch (e) {
-      console.error('❌ Worker error', e);
+    } catch (err) {
+      console.error('❌ Worker error', err);
       toggleAction(true);
       return;
     }
 
-    let hasErr = false;
-    vis.forEach(f => {
-      const ex = !!result[f.flag];
-      showDuplicateError(f, ex);
-      if (ex) hasErr = true;
+    // show/hide lỗi dựa trên flag
+    let hasError = false;
+    visible.forEach(f => {
+      const exists = !!result[f.flag];
+      showDuplicateError(f, exists);
+      if (exists) hasError = true;
     });
-    toggleAction(hasErr);
+    toggleAction(hasError);
   }
 
-  const debRun = debounce(runValidation);
+  const debouncedRun = debounce(runValidation, 300);
 
-  // Gắn listeners
+  // Gắn listeners cho input & click Next/Submit
   function attachListeners() {
     document.body.addEventListener('input', e => {
-      if (fields.some(f=>f.id===e.target.id)) debRun();
+      if (fields.some(f => f.id === e.target.id)) {
+        debouncedRun();
+      }
     });
     document.body.addEventListener('click', e => {
-      if (e.target.closest('.form-pagebreak-next, button[type="submit"], input[type="submit"]')) {
+      if (e.target.closest(
+        '.form-pagebreak-next, button[type="submit"], input[type="submit"]'
+      )) {
         setTimeout(runValidation, 0);
       }
     });
   }
 
-  // Init khi form render xong
+  // Khởi tạo khi form render xong
   document.addEventListener('DOMContentLoaded', () => {
-    const mo = new MutationObserver((_,obs) => {
-      if (fields.every(f=>document.getElementById(f.id))) {
+    const mo = new MutationObserver((_, obs) => {
+      if (fields.every(f => document.getElementById(f.id))) {
         obs.disconnect();
+        clearDefaultErrors();
         attachListeners();
         runValidation();
       }
     });
-    mo.observe(document.body, { childList:true, subtree:true });
+    mo.observe(document.body, { childList: true, subtree: true });
   });
 
 })();
