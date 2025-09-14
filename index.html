@@ -882,44 +882,6 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 </html><script type="text/javascript">JotForm.ownerView=true;</script><script type="text/javascript">JotForm.isNewSACL=true;</script>
 
 <style>
-  .duplicate-error {
-    opacity: 0;
-    transition: opacity 0.3s ease-in-out;
-  }
-  .duplicate-error.show {
-    opacity: 1;
-  }
-</style>
-
-<!-- 3) Script kiểm tra duplicate, show lỗi y chang required -->
-<script>
-;(function(){
-  const tracked = ['input_3','input_38','input_53'];
-
-  // Remove JotForm’s red icon/message on those inputs
-  function clearInitialRequiredErrors() {
-    tracked.forEach(id => {
-      const inp = document.getElementById(id);
-      if (!inp) return;
-      const line = inp.closest('li.form-line');
-      if (line) {
-        line.classList.remove('form-line-error');
-        inp.classList.remove('form-validation-error');
-        // remove any existing .form-error-message under this li
-        line.querySelectorAll('.form-error-message').forEach(el => el.remove());
-      }
-    });
-  }
-
-  // Run once after a short delay (giao thoa với JotForm render)
-  document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(clearInitialRequiredErrors, 300);
-  });
-})();
-</script>
-
-<!-- 1) CSS fade-in -->
-<style>
   .fade-in {
     animation: fadeIn 0.3s ease-in-out;
   }
@@ -935,59 +897,50 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   'use strict';
 
   const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
-
-  // Các field cần kiểm tra duplicate
   const fields = [
-    { id: 'input_3',  errId: 'id_92', flag: 'emailExists',      page: 2 },
-    { id: 'input_38', errId: 'id_93', flag: 'personalIdExists', page: 2 },
-    { id: 'input_53', errId: 'id_94', flag: 'studentIdExists',  page: 3 }
+    { id: 'input_3',  errId: 'id_92', flag: 'emailExists',     page: 2 },
+    { id: 'input_38', errId: 'id_93', flag: 'personalIdExists',page: 2 },
+    { id: 'input_53', errId: 'id_94', flag: 'studentIdExists', page: 3 }
   ];
 
-  // Xóa lỗi required mặc định của JotForm trên các field đã track
-  function clearDefaultErrors() {
-    fields.forEach(f => {
-      const inp = document.getElementById(f.id);
-      const li  = inp?.closest('li.form-line');
-      if (!li || !inp) return;
-      li.classList.remove('form-line-error');
-      inp.classList.remove('form-validation-error');
-      li.querySelectorAll('.form-error-message').forEach(el => el.remove());
-    });
-  }
-
-  // Debounce helper
+  // Debounce
   function debounce(fn, ms = 300) {
-    let timer;
-    return (...args) => {
-      clearTimeout(timer);
-      timer = setTimeout(() => fn(...args), ms);
+    let t;
+    return (...a) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn(...a), ms);
     };
   }
 
-  // Hiển thị hoặc ẩn lỗi duplicate
-  function showError(f, show) {
-    const inp = document.getElementById(f.id);
-    const li  = inp?.closest('li.form-line');
-    const err = document.getElementById(f.errId);
-    if (!li || !inp || !err) return;
+  // Show hoặc hide lỗi duplicate ngay dưới input
+  function showDuplicateError(f, show) {
+    const inp  = document.getElementById(f.id);
+    const line = inp?.closest('li.form-line');
+    if (!inp || !line) return;
+
+    // tìm div đã tạo, hoặc tạo mới khi cần
+    let box = line.querySelector(`.dup-error#dup_${f.id}`);
+    if (!box && show) {
+      box = document.createElement('div');
+      box.className = 'form-error-message dup-error fade-in';
+      box.id = 'dup_' + f.id;
+      inp.insertAdjacentElement('afterend', box);
+    }
 
     if (show) {
-      li.classList.add('form-line-error');
+      // lấy text custom từ <li id="id_9x">, fallback "Duplicate entry"
+      const text = document.getElementById(f.errId)?.innerText.trim() || 'Duplicate entry';
+      box.textContent = text;
+      line.classList.add('form-line-error');
       inp.classList.add('form-validation-error');
-      err.classList.remove('always-hidden','form-field-hidden');
-      err.style.display = '';
-      err.classList.add('fade-in');
-      li.insertAdjacentElement('afterend', err);
     } else {
-      li.classList.remove('form-line-error');
+      if (box) box.textContent = '';
+      line.classList.remove('form-line-error');
       inp.classList.remove('form-validation-error');
-      err.classList.remove('fade-in');
-      err.classList.add('always-hidden','form-field-hidden');
-      err.style.display = 'none';
     }
   }
 
-  // Bật/tắt nút Next và Submit
+  // Bật/tắt Next & Submit
   function toggleAction(disabled) {
     document.querySelectorAll(
       '.form-pagebreak-next, button[type="submit"], input[type="submit"]'
@@ -996,33 +949,33 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
   }
 
-  // Xác định page dựa trên field đang hiển thị
+  // Xác định page hiện tại
   function getCurrentPage() {
-    const vis = fields.find(f => {
-      const inp = document.getElementById(f.id);
-      return inp && inp.offsetParent !== null;
-    });
-    return vis ? vis.page : null;
+    const active = document.querySelector('.jfActive');
+    if (!active) return null;
+    const n = parseInt(active.textContent.trim(), 10);
+    return isNaN(n) ? null : n;
   }
 
-  // Chạy kiểm tra duplicate
+  // Core validation
   async function runValidation() {
     const page = getCurrentPage();
     if (page !== 2 && page !== 3) {
-      fields.forEach(f => showError(f, false));
+      fields.forEach(f => showDuplicateError(f, false));
       toggleAction(false);
       return;
     }
 
-    const visible = fields.filter(f => f.page === page);
+    const vis = fields.filter(f => f.page === page);
     const payload = {};
-    visible.forEach(f => {
-      payload[f.flag.replace(/Exists$/, '')] =
+    vis.forEach(f => {
+      payload[f.flag.replace(/Exists$/,'')] =
         document.getElementById(f.id).value.trim();
     });
 
+    // skip nếu blank
     if (Object.values(payload).every(v => !v)) {
-      visible.forEach(f => showError(f, false));
+      vis.forEach(f => showDuplicateError(f, false));
       toggleAction(true);
       return;
     }
@@ -1032,7 +985,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     try {
       const res = await fetch(workerUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type':'application/json' },
         body: JSON.stringify(payload)
       });
       result = await res.json();
@@ -1043,44 +996,39 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       return;
     }
 
-    let hasError = false;
-    visible.forEach(f => {
-      const exists = !!result[f.flag];
-      showError(f, exists);
-      if (exists) hasError = true;
+    let hasErr = false;
+    vis.forEach(f => {
+      const ex = !!result[f.flag];
+      showDuplicateError(f, ex);
+      if (ex) hasErr = true;
     });
-    toggleAction(hasError);
+    toggleAction(hasErr);
   }
 
-  const debouncedRun = debounce(runValidation);
+  const debRun = debounce(runValidation);
 
-  // Gắn listener input và click Next/Submit
+  // Gắn listeners
   function attachListeners() {
     document.body.addEventListener('input', e => {
-      if (fields.some(f => f.id === e.target.id)) {
-        debouncedRun();
-      }
+      if (fields.some(f=>f.id===e.target.id)) debRun();
     });
     document.body.addEventListener('click', e => {
-      if (e.target.closest(
-        '.form-pagebreak-next, button[type="submit"], input[type="submit"]'
-      )) {
+      if (e.target.closest('.form-pagebreak-next, button[type="submit"], input[type="submit"]')) {
         setTimeout(runValidation, 0);
       }
     });
   }
 
-  // Khởi tạo khi form render xong
+  // Init khi form render xong
   document.addEventListener('DOMContentLoaded', () => {
-    const mo = new MutationObserver((_, obs) => {
-      if (fields.every(f => document.getElementById(f.id))) {
+    const mo = new MutationObserver((_,obs) => {
+      if (fields.every(f=>document.getElementById(f.id))) {
         obs.disconnect();
-        clearDefaultErrors();
         attachListeners();
         runValidation();
       }
     });
-    mo.observe(document.body, { childList: true, subtree: true });
+    mo.observe(document.body, { childList:true, subtree:true });
   });
 
 })();
