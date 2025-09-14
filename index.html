@@ -882,16 +882,16 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 </html><script type="text/javascript">JotForm.ownerView=true;</script><script type="text/javascript">JotForm.isNewSACL=true;</script>
 
 <style>
-  .fade-in {
-    animation: fadeIn 0.3s ease-in-out;
+  .duplicate-error {
+    opacity: 0;
+    transition: opacity 0.3s ease-in-out;
   }
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(-4px); }
-    to   { opacity: 1; transform: translateY(0); }
+  .duplicate-error.show {
+    opacity: 1;
   }
 </style>
 
-<!-- 3) Duplicate-Check Script -->
+<!-- 3) Script kiểm tra duplicate, show lỗi y chang required -->
 <script>
 ;(function(){
   'use strict';
@@ -911,28 +911,30 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     };
   }
 
-  function showJotFormError(f, show) {
+  function showDuplicateError(f, show) {
     const input = document.getElementById(f.id);
-    const line  = input?.closest('li.form-line');
-    if (!input || !line) return;
-
-    let errBox = line.querySelector('.form-error-message');
-    if (!errBox && show) {
-      errBox = document.createElement('div');
-      errBox.className = 'form-error-message fade-in';
-      errBox.id = 'error_' + f.id;
-      input.insertAdjacentElement('afterend', errBox);
-    }
+    const lineLi = input?.closest('li.form-line');
+    const errLi  = document.getElementById(f.errId);
+    if (!input || !lineLi || !errLi) return;
 
     if (show) {
-      const text = document.getElementById(f.errId)?.innerText.trim() || 'Duplicate entry';
-      errBox.textContent = text;
-      line.classList.add('form-line-error');
+      // 1) Highlight đỏ như required
+      lineLi.classList.add('form-line-error');
       input.classList.add('form-validation-error');
+
+      // 2) Show & move <li id="id_9x"> ngay sau li chứa input
+      errLi.classList.add('show');
+      errLi.classList.remove('always-hidden','form-field-hidden');
+      errLi.style.display = '';
+      lineLi.insertAdjacentElement('afterend', errLi);
     } else {
-      if (errBox) errBox.textContent = '';
-      line.classList.remove('form-line-error');
+      // Remove back to normal
+      lineLi.classList.remove('form-line-error');
       input.classList.remove('form-validation-error');
+
+      errLi.classList.remove('show');
+      errLi.classList.add('always-hidden','form-field-hidden');
+      errLi.style.display = 'none';
     }
   }
 
@@ -945,7 +947,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   }
 
   async function runValidation() {
-    // 1) Tìm các field đang visible
+    // 1) Lọc field đang visible (page 2/3)
     const visible = fields.filter(f => {
       const inp = document.getElementById(f.id);
       return inp && inp.offsetParent !== null;
@@ -953,26 +955,26 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
     // 2) Nếu none → clear lỗi + enable nút
     if (visible.length === 0) {
-      fields.forEach(f => showJotFormError(f, false));
+      fields.forEach(f => showDuplicateError(f, false));
       toggleAction(false);
       return;
     }
 
-    // 3) Xác định page từ visible[0].page (2 hoặc 3)
+    // 3) Xác định page từ visible[0].page
     const page = visible[0].page;
     console.log('🚦 runValidation on page', page);
 
     // 4) Build payload
     const payload = {};
     visible.forEach(f => {
-      payload[f.flag.replace(/Exists$/, '')] =
+      payload[f.flag.replace(/Exists$/,'')] =
         document.getElementById(f.id).value.trim();
     });
 
-    // 5) Nếu tất cả blank → hide lỗi + disable nút
+    // 5) Nếu blank all → hide lỗi + disable nút
     if (Object.values(payload).every(v => !v)) {
       console.log('   ⚠️ All fields blank – skip Worker');
-      visible.forEach(f => showJotFormError(f, false));
+      visible.forEach(f => showDuplicateError(f, false));
       toggleAction(true);
       return;
     }
@@ -983,7 +985,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     try {
       const res = await fetch(workerUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type':'application/json' },
         body: JSON.stringify(payload)
       });
       result = await res.json();
@@ -994,11 +996,11 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       return;
     }
 
-    // 7) Show/hide error & disable nút nếu có lỗi
+    // 7) Hiện/ẩn lỗi dựa trên flag
     let hasError = false;
     visible.forEach(f => {
       const exists = !!result[f.flag];
-      showJotFormError(f, exists);
+      showDuplicateError(f, exists);
       if (exists) hasError = true;
     });
     toggleAction(hasError);
@@ -1007,13 +1009,11 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   const debouncedRun = debounce(runValidation);
 
   function attachListeners() {
-    // input event
     document.body.addEventListener('input', e => {
       if (fields.some(f => f.id === e.target.id)) {
         debouncedRun();
       }
     });
-    // click Next/Submit
     document.body.addEventListener('click', e => {
       if (e.target.closest('.form-pagebreak-next, button[type="submit"], input[type="submit"]')) {
         setTimeout(runValidation, 0);
@@ -1021,11 +1021,11 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
   }
 
-  // Chờ form render xong bằng MutationObserver
+  // 4) Chờ form render xong bằng MutationObserver
   document.addEventListener('DOMContentLoaded', () => {
     const mo = new MutationObserver((_, obs) => {
       if (fields.some(f => document.getElementById(f.id))) {
-        console.log('✅ Tracked input found, init listeners');
+        console.log('✅ Tracked input found, initializing');
         obs.disconnect();
         attachListeners();
         runValidation();
@@ -1036,6 +1036,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
 })();
 </script>
+
 
 
 
