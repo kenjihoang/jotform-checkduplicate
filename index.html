@@ -884,96 +884,100 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 <script>
 ;(function(){
   const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
-  const debounce = (fn, ms = 500) => {
-    let timer;
+  const debounce  = (fn, ms = 500) => {
+    let t;
     return (...args) => {
-      clearTimeout(timer);
-      timer = setTimeout(() => fn(...args), ms);
+      clearTimeout(t);
+      t = setTimeout(() => fn(...args), ms);
     };
   };
 
-  // Lấy luôn nút Next/Submit đang hiển thị trên page
-  function getActionButtons() {
-    return [
-      ...document.querySelectorAll('[id^="form-pagebreak-next_"]'),
-      document.querySelector('button[type="submit"], input[type="submit"]')
-    ]
-    .filter(btn => btn && btn.offsetParent !== null);
+  function onFormReady(cb) {
+    if (document.querySelector('#input_3')) cb();
+    else setTimeout(() => onFormReady(cb), 100);
   }
 
-  // Hàm validate: query lại input, error message, gọi Worker, show/hide + disable nút
-  async function runValidation() {
-    const emailEl  = document.querySelector('#input_3');
-    const pidEl    = document.querySelector('#input_38');
-    const sidEl    = document.querySelector('#input_53');
-    if (!emailEl || !pidEl || !sidEl) return;
+  onFormReady(() => {
+    // cấu hình map input → error selector
+    const config = [
+      { key: 'email',      qId: 3,  sel: '#input_3',  err: '[name="ErrorMessage_EmailExists"]' },
+      { key: 'personalId', qId: 38, sel: '#input_38', err: '[name="ErrorMessage_PIDExists"]' },
+      { key: 'studentId',  qId: 53, sel: '#input_53', err: '[name="ErrorMessage_SIDExists"]' }
+    ];
 
-    // những thẻ error message bạn phải check lại selector cho đúng
-    const emailErr = document.querySelector('[name="ErrorMessage_EmailExists"]');
-    const pidErr   = document.querySelector('[name="ErrorMessage_PIDExists"]');
-    const sidErr   = document.querySelector('[name="ErrorMessage_SIDExists"]');
-
-    const payload = {
-      email:      emailEl.value.trim(),
-      personalId: pidEl.value.trim(),
-      studentId:  sidEl.value.trim()
-    };
-
-    // nếu cả ba rỗng → reset ui + lock
-    if (!payload.email && !payload.personalId && !payload.studentId) {
-      [emailErr, pidErr, sidErr].forEach(el => el && (el.style.display = 'none'));
-      getActionButtons().forEach(btn => btn.disabled = true);
-      return;
+    // helper: nút Next/Submit đang visible
+    function getVisibleActionBtn() {
+      return Array.from(document.querySelectorAll('[id^="form-pagebreak-next_"], button[type="submit"], input[type="submit"]'))
+        .find(btn => btn.offsetParent !== null);
     }
 
-    try {
-      const res = await fetch(workerUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+    // chính là hàm gửi payload & update UI
+    async function runValidation() {
+      // 1. Lọc ra những field đang visible (trên page 2 hoặc 3)
+      const visibleFields = config.filter(c => {
+        const el = document.querySelector(c.sel);
+        return el && el.offsetParent !== null;
       });
-      const { emailExists, personalIdExists, studentIdExists } = await res.json();
 
-      // show / hide error
-      emailErr && (emailErr.style.display = emailExists ? 'block' : 'none');
-      pidErr   && (pidErr.style.display   = personalIdExists ? 'block' : 'none');
-      sidErr   && (sidErr.style.display   = studentIdExists ? 'block' : 'none');
-
-      // disable nếu có ít nhất 1 lỗi
-      const hasError = emailExists || personalIdExists || studentIdExists;
-      getActionButtons().forEach(btn => btn.disabled = hasError);
-
-    } catch (err) {
-      // network/API lỗi → tạm lock
-      getActionButtons().forEach(btn => btn.disabled = true);
-    }
-  }
-
-  const debouncedValidate = debounce(runValidation, 500);
-
-  function init() {
-    // 1. Gắn input listener (sẽ bắt input trên bất kỳ page nào)
-    document.body.addEventListener('input', e => {
-      if (['input_3','input_38','input_53'].includes(e.target.id)) {
-        debouncedValidate();
+      // 2. Nếu không có field nổi (ví dụ page 1, 4–7) → reset lỗi, không disable gì
+      const actionBtn = getVisibleActionBtn();
+      if (!visibleFields.length) {
+        document.querySelectorAll(config.map(c => c.err).join(','))
+          .forEach(el => el && (el.style.display = 'none'));
+        if (actionBtn) actionBtn.disabled = false;
+        return;
       }
+
+      // 3. Build payload chỉ gồm những field visible
+      const payload = {};
+      visibleFields.forEach(c => {
+        payload[c.key] = document.querySelector(c.sel).value.trim();
+      });
+
+      // 4. Gọi Worker
+      let result = {};
+      try {
+        const res  = await fetch(workerUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        result = await res.json();
+      } catch {
+        // network error → assume error so block
+        visibleFields.forEach(c => result[c.key + 'Exists'] = true);
+      }
+
+      // 5. Show/Hide error message & disable/enable nút
+      let hasError = false;
+      visibleFields.forEach(c => {
+        const exists = result[c.key + 'Exists'];
+        const errEl  = document.querySelector(c.err);
+        if (errEl) errEl.style.display = exists ? 'block' : 'none';
+        if (exists) hasError = true;
+      });
+      if (actionBtn) actionBtn.disabled = hasError;
+    }
+
+    // debounce + attach input listener trên cả form
+    const deb = debounce(runValidation, 500);
+    document.body.addEventListener('input', e => {
+      if (['input_3','input_38','input_53'].includes(e.target.id)) deb();
     });
 
-    // 2. Bắt page-break click để rerun ngay khi page thay đổi
+    // rerun khi user click Next (chuyển page)
     document.body.addEventListener('click', e => {
       if (e.target.matches('[id^="form-pagebreak-next_"]')) {
-        // cho time 0 để form load page mới xong
         setTimeout(runValidation, 0);
       }
     });
 
-    // 3. Test lần đầu (để page1 / page2 hiện ra đều lock đúng)
+    // lần đầu khởi chạy
     runValidation();
-  }
-
-  window.addEventListener('DOMContentLoaded', init);
+  });
 })();
 </script>
+
 
 
 
