@@ -881,18 +881,10 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 <link id=color-scheme-style href="https://cdn.jotfor.ms/stylebuilder/static/color-scheme.css?v=3.3.65438" type="text/css" rel="stylesheet" /></body>
 </html><script type="text/javascript">JotForm.ownerView=true;</script><script type="text/javascript">JotForm.isNewSACL=true;</script>
 
-<style>
-  .form-error-message.fade-in {
-    animation: fadeIn 0.3s ease-in-out;
-  }
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(-4px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-</style>
-
 <script>
 ;(function(){
+  'use strict';
+
   const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
   const fields = [
     { id: 'input_3',  errId: 'id_92', flag: 'emailExists',      page: 2 },
@@ -900,11 +892,13 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     { id: 'input_53', errId: 'id_94', flag: 'studentIdExists',  page: 3 }
   ];
 
+  console.log('🔧 Duplicate‐Check script loaded');
+
   function debounce(fn, ms = 300) {
-    let t;
+    let timer;
     return (...args) => {
-      clearTimeout(t);
-      t = setTimeout(() => fn(...args), ms);
+      clearTimeout(timer);
+      timer = setTimeout(() => fn(...args), ms);
     };
   }
 
@@ -916,22 +910,18 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     let errBox = line.querySelector('.form-error-message');
     if (!errBox && show) {
       errBox = document.createElement('div');
-      errBox.className = 'form-error-message';
+      errBox.className = 'form-error-message fade-in';
       errBox.id = 'error_' + f.id;
       input.insertAdjacentElement('afterend', errBox);
     }
 
     if (show) {
-      const customText = document.getElementById(f.errId)?.innerText?.trim() || 'Duplicate entry';
-      errBox.textContent = customText;
-      errBox.classList.add('fade-in');
+      const text = document.getElementById(f.errId)?.innerText.trim() || 'Duplicate entry';
+      errBox.textContent = text;
       line.classList.add('form-line-error');
       input.classList.add('form-validation-error');
     } else {
-      if (errBox) {
-        errBox.textContent = '';
-        errBox.classList.remove('fade-in');
-      }
+      if (errBox) errBox.textContent = '';
       line.classList.remove('form-line-error');
       input.classList.remove('form-validation-error');
     }
@@ -954,9 +944,11 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   }
 
   async function runValidation() {
+    console.log('🚦 runValidation triggered');
     const page = getCurrentPage();
-    console.log('🚦 runValidation on page', page);
+    console.log('   • current page:', page);
 
+    // Clear when not on page 2/3
     if (page !== 2 && page !== 3) {
       fields.forEach(f => showJotFormError(f, false));
       toggleAction(false);
@@ -970,14 +962,15 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       payload[f.flag.replace(/Exists$/, '')] = val;
     });
 
+    // Skip if all blank
     if (Object.values(payload).every(v => !v)) {
-      console.log('⚠️ All fields blank, skipping Worker');
+      console.log('   ⚠️ all fields blank – skipping Worker');
       visible.forEach(f => showJotFormError(f, false));
       toggleAction(true);
       return;
     }
 
-    console.log('📡 payload →', payload);
+    console.log('   📡 sending payload →', payload);
     let result = {};
     try {
       const res = await fetch(workerUrl, {
@@ -986,9 +979,9 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
         body: JSON.stringify(payload)
       });
       result = await res.json();
-      console.log('📥 worker ↩︎', result);
-    } catch (e) {
-      console.error('❌ Worker error', e);
+      console.log('   📥 worker response →', result);
+    } catch (err) {
+      console.error('   ❌ Worker error', err);
       toggleAction(true);
       return;
     }
@@ -1005,38 +998,50 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   const debouncedRun = debounce(runValidation);
 
   function attachListeners() {
+    console.log('🔗 Attaching input & click listeners');
     document.body.addEventListener('input', e => {
-      if (fields.map(f => f.id).includes(e.target.id)) {
+      if (fields.some(f => f.id === e.target.id)) {
+        console.log('   ✏️ input on', e.target.id);
         debouncedRun();
       }
     });
-
     document.body.addEventListener('click', e => {
       if (e.target.closest('.form-pagebreak-next, button[type="submit"], input[type="submit"]')) {
+        console.log('   👆 next/submit clicked');
         setTimeout(runValidation, 0);
       }
     });
-
-    document.querySelectorAll('.form-pagebreak-page').forEach(pageEl => {
-      new MutationObserver(muts => {
-        muts.forEach(m => {
-          if (m.attributeName === 'style') runValidation();
-        });
-      }).observe(pageEl, { attributes: true });
-    });
   }
 
+  // Wait until JotForm injects all fields
   document.addEventListener('DOMContentLoaded', () => {
-    const observer = new MutationObserver(() => {
+    console.log('📦 DOMContentLoaded');
+    const observer = new MutationObserver((mutations, obs) => {
+      console.log('👀 MutationObserver fired');
       if (fields.every(f => document.getElementById(f.id))) {
-        observer.disconnect();
+        console.log('✅ All tracked inputs found');
+        obs.disconnect();
         attachListeners();
         runValidation();
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });
   });
+
 })();
 </script>
+<style>
+  /* fade-in animation for error messages */
+  .fade-in {
+    animation: fadeIn 0.3s ease-in-out;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+</style>
+
+
+
 
 
