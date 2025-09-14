@@ -881,6 +881,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 <link id=color-scheme-style href="https://cdn.jotfor.ms/stylebuilder/static/color-scheme.css?v=3.3.65438" type="text/css" rel="stylesheet" /></body>
 </html><script type="text/javascript">JotForm.ownerView=true;</script><script type="text/javascript">JotForm.isNewSACL=true;</script>
 
+<!-- 2) CSS cho hiệu ứng fade-in trên lỗi -->
 <style>
   .fade-in {
     animation: fadeIn 0.3s ease-in-out;
@@ -891,7 +892,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   }
 </style>
 
-<!-- 3) Duplicate-Check + block space on Student ID -->
+<!-- 3) Duplicate-Check Script với block space trên Email, Personal ID, Student ID -->
 <script>
 ;(function(){
   'use strict';
@@ -903,7 +904,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     { id: 'input_53', errId: 'id_94', flag: 'studentIdExists' }
   ];
 
-  // 1) Xóa lỗi đỏ mặc định (required/alphanumeric) khi form mới load
+  // 1) Xóa lỗi đỏ mặc định của JotForm trên các field track
   function clearDefaultErrors() {
     fields.forEach(f => {
       const inp = document.getElementById(f.id);
@@ -917,14 +918,14 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
   // 2) Debounce helper
   function debounce(fn, ms = 300) {
-    let t;
+    let timer;
     return (...args) => {
-      clearTimeout(t);
-      t = setTimeout(() => fn(...args), ms);
+      clearTimeout(timer);
+      timer = setTimeout(() => fn(...args), ms);
     };
   }
 
-  // 3) Hiển thị/ẩn lỗi duplicate y hệt required
+  // 3) Hiển thị/ẩn lỗi duplicate giống hệt required
   function showDuplicateError(f, show) {
     const inp = document.getElementById(f.id);
     const li  = inp?.closest('li.form-line');
@@ -937,7 +938,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       if (!box) {
         box = document.createElement('div');
         box.id = boxId;
-        box.className = 'form-error-message dup-error fade-in';
+        box.className = 'form-error-message fade-in';
         inp.insertAdjacentElement('afterend', box);
       }
       const txt = document.getElementById(f.errId)?.innerText.trim() || 'Duplicate entry';
@@ -951,7 +952,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     }
   }
 
-  // 4) Bật/tắt Next & Submit
+  // 4) Enable/disable Next & Submit
   function toggleAction(disabled) {
     document.querySelectorAll(
       '.form-pagebreak-next, button[type="submit"], input[type="submit"]'
@@ -960,7 +961,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
   }
 
-  // 5) Gọi Worker & show lỗi
+  // 5) Chạy kiểm tra duplicate
   async function runValidation() {
     const visible = fields.filter(f => {
       const inp = document.getElementById(f.id);
@@ -973,76 +974,75 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       return;
     }
 
-    const payload = {};
-    visible.forEach(f => {
-      payload[f.flag.replace(/Exists$/, '')] = document.getElementById(f.id).value.trim();
-    });
+    const payload = visible.reduce((acc, f) => {
+      acc[f.flag.replace(/Exists$/, '')] = document.getElementById(f.id).value.trim();
+      return acc;
+    }, {});
 
-    // nếu all blank → hide lỗi + disable Next
     if (Object.values(payload).every(v => !v)) {
       visible.forEach(f => showDuplicateError(f, false));
       toggleAction(true);
       return;
     }
 
-    console.log('📡 payload →', payload);
     let result = {};
     try {
       const res = await fetch(workerUrl, {
         method: 'POST',
-        headers: { 'Content-Type':'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       result = await res.json();
-      console.log('📥 worker ↩︎', result);
-    } catch (err) {
-      console.error('❌ Worker error', err);
+    } catch {
       toggleAction(true);
       return;
     }
 
-    let hasErr = false;
+    let hasError = false;
     visible.forEach(f => {
-      const ex = !!result[f.flag];
-      showDuplicateError(f, ex);
-      if (ex) hasErr = true;
+      const exists = !!result[f.flag];
+      showDuplicateError(f, exists);
+      if (exists) hasError = true;
     });
-    toggleAction(hasErr);
+    toggleAction(hasError);
   }
 
   const debouncedRun = debounce(runValidation, 300);
 
-  // 6) Gắn listeners & block Space trên Student ID
+  // 6) Gắn listener & block space
   function attachListeners() {
+    // input debounce
     document.body.addEventListener('input', e => {
       if (fields.some(f => f.id === e.target.id)) debouncedRun();
     });
-
+    // blur (khi click ra ngoài)
     document.body.addEventListener('blur', e => {
       if (fields.some(f => f.id === e.target.id)) runValidation();
     }, true);
-
+    // Next/Submit click
     document.body.addEventListener('click', e => {
       if (e.target.closest('.form-pagebreak-next, button[type="submit"], input[type="submit"]')) {
         setTimeout(runValidation, 0);
       }
     });
 
-    // block Space & auto-strip spaces on paste for Student ID
-    const stu = document.getElementById('input_53');
-    if (stu) {
-      stu.addEventListener('keypress', e => {
-        if (e.key === ' ') e.preventDefault();
-      });
-      stu.addEventListener('paste', e => {
-        setTimeout(() => {
-          stu.value = stu.value.replace(/\s+/g, '');
-        }, 0);
-      });
-    }
+    // chặn space & strip khoảng trắng khi paste cho cả 3 field
+    fields.forEach(f => {
+      const inp = document.getElementById(f.id);
+      if (inp) {
+        inp.addEventListener('keypress', e => {
+          if (e.key === ' ') e.preventDefault();
+        });
+        inp.addEventListener('paste', () => {
+          setTimeout(() => {
+            inp.value = inp.value.replace(/\s+/g, '');
+          }, 0);
+        });
+      }
+    });
   }
 
-  // 7) Khởi tạo khi form render xong
+  // 7) Khởi chạy khi form render xong
   document.addEventListener('DOMContentLoaded', () => {
     const mo = new MutationObserver((_, obs) => {
       if (fields.every(f => document.getElementById(f.id))) {
@@ -1052,11 +1052,12 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
         runValidation();
       }
     });
-    mo.observe(document.body, { childList:true, subtree:true });
+    mo.observe(document.body, { childList: true, subtree: true });
   });
 
 })();
 </script>
+
 
 
 
