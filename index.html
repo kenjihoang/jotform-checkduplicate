@@ -894,6 +894,44 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 <!-- 3) Script kiểm tra duplicate, show lỗi y chang required -->
 <script>
 ;(function(){
+  const tracked = ['input_3','input_38','input_53'];
+
+  // Remove JotForm’s red icon/message on those inputs
+  function clearInitialRequiredErrors() {
+    tracked.forEach(id => {
+      const inp = document.getElementById(id);
+      if (!inp) return;
+      const line = inp.closest('li.form-line');
+      if (line) {
+        line.classList.remove('form-line-error');
+        inp.classList.remove('form-validation-error');
+        // remove any existing .form-error-message under this li
+        line.querySelectorAll('.form-error-message').forEach(el => el.remove());
+      }
+    });
+  }
+
+  // Run once after a short delay (giao thoa với JotForm render)
+  document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(clearInitialRequiredErrors, 300);
+  });
+})();
+</script>
+
+<!-- 1) CSS fade-in -->
+<style>
+  .fade-in {
+    animation: fadeIn 0.3s ease-in-out;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+</style>
+
+<!-- 2) Duplicate‐Check Script -->
+<script>
+;(function(){
   'use strict';
 
   const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
@@ -904,35 +942,33 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   ];
 
   function debounce(fn, ms = 300) {
-    let timer;
+    let t;
     return (...args) => {
-      clearTimeout(timer);
-      timer = setTimeout(() => fn(...args), ms);
+      clearTimeout(t);
+      t = setTimeout(() => fn(...args), ms);
     };
   }
 
-  function showDuplicateError(f, show) {
-    const input = document.getElementById(f.id);
-    const lineLi = input?.closest('li.form-line');
-    const errLi  = document.getElementById(f.errId);
-    if (!input || !lineLi || !errLi) return;
+  function showJotFormError(f, show) {
+    const inp = document.getElementById(f.id);
+    const line = inp?.closest('li.form-line');
+    const errLi = document.getElementById(f.errId);
+    if (!inp || !line || !errLi) return;
 
     if (show) {
-      // 1) Highlight đỏ như required
-      lineLi.classList.add('form-line-error');
-      input.classList.add('form-validation-error');
+      // highlight đỏ
+      line.classList.add('form-line-error');
+      inp.classList.add('form-validation-error');
 
-      // 2) Show & move <li id="id_9x"> ngay sau li chứa input
-      errLi.classList.add('show');
+      // move & show thẻ <li id="…"> ngay sau line
       errLi.classList.remove('always-hidden','form-field-hidden');
       errLi.style.display = '';
-      lineLi.insertAdjacentElement('afterend', errLi);
+      errLi.classList.add('fade-in');
+      line.insertAdjacentElement('afterend', errLi);
     } else {
-      // Remove back to normal
-      lineLi.classList.remove('form-line-error');
-      input.classList.remove('form-validation-error');
-
-      errLi.classList.remove('show');
+      line.classList.remove('form-line-error');
+      inp.classList.remove('form-validation-error');
+      errLi.classList.remove('fade-in');
       errLi.classList.add('always-hidden','form-field-hidden');
       errLi.style.display = 'none';
     }
@@ -947,71 +983,69 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   }
 
   async function runValidation() {
-    // 1) Lọc field đang visible (page 2/3)
+    // chỉ lấy những field đang hiện
     const visible = fields.filter(f => {
       const inp = document.getElementById(f.id);
       return inp && inp.offsetParent !== null;
     });
 
-    // 2) Nếu none → clear lỗi + enable nút
-    if (visible.length === 0) {
-      fields.forEach(f => showDuplicateError(f, false));
+    // nếu none → reset + enable nút
+    if (!visible.length) {
+      fields.forEach(f => showJotFormError(f, false));
       toggleAction(false);
       return;
     }
 
-    // 3) Xác định page từ visible[0].page
+    // xác định page từ visible[0].page
     const page = visible[0].page;
-    console.log('🚦 runValidation on page', page);
+    console.log('runValidation on page', page);
 
-    // 4) Build payload
+    // build payload
     const payload = {};
     visible.forEach(f => {
-      payload[f.flag.replace(/Exists$/,'')] =
+      payload[f.flag.replace(/Exists$/,'')] = 
         document.getElementById(f.id).value.trim();
     });
 
-    // 5) Nếu blank all → hide lỗi + disable nút
+    // nếu blank → hide lỗi + disable nút
     if (Object.values(payload).every(v => !v)) {
-      console.log('   ⚠️ All fields blank – skip Worker');
-      visible.forEach(f => showDuplicateError(f, false));
+      console.log('all blank – skip Worker');
+      visible.forEach(f => showJotFormError(f, false));
       toggleAction(true);
       return;
     }
 
-    // 6) Gọi Worker
-    console.log('   📡 payload →', payload);
+    console.log('payload →', payload);
     let result = {};
     try {
       const res = await fetch(workerUrl, {
         method: 'POST',
-        headers: { 'Content-Type':'application/json' },
+        headers: {'Content-Type':'application/json'},
         body: JSON.stringify(payload)
       });
       result = await res.json();
-      console.log('   📥 worker ↩︎', result);
+      console.log('worker ↩︎', result);
     } catch (e) {
-      console.error('   ❌ Worker error', e);
+      console.error('Worker error', e);
       toggleAction(true);
       return;
     }
 
-    // 7) Hiện/ẩn lỗi dựa trên flag
-    let hasError = false;
+    let hasErr = false;
     visible.forEach(f => {
       const exists = !!result[f.flag];
-      showDuplicateError(f, exists);
-      if (exists) hasError = true;
+      showJotFormError(f, exists);
+      if (exists) hasErr = true;
     });
-    toggleAction(hasError);
+    toggleAction(hasErr);
   }
 
-  const debouncedRun = debounce(runValidation);
+  const debRun = debounce(runValidation, 300);
 
   function attachListeners() {
     document.body.addEventListener('input', e => {
       if (fields.some(f => f.id === e.target.id)) {
-        debouncedRun();
+        debRun();
       }
     });
     document.body.addEventListener('click', e => {
@@ -1021,11 +1055,9 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
   }
 
-  // 4) Chờ form render xong bằng MutationObserver
   document.addEventListener('DOMContentLoaded', () => {
     const mo = new MutationObserver((_, obs) => {
       if (fields.some(f => document.getElementById(f.id))) {
-        console.log('✅ Tracked input found, initializing');
         obs.disconnect();
         attachListeners();
         runValidation();
@@ -1036,6 +1068,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
 })();
 </script>
+
 
 
 
