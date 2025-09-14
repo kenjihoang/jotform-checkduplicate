@@ -159,8 +159,24 @@
     mo.observe(document.body, { childList: true, subtree: true });
   });
 
-})();
-                   
+  // -- Hàm init chỉ chạy khi form đã hiện đủ các field --
+  function initWhenReady() {
+    const f3 = document.getElementById('input_3');
+    const f38 = document.getElementById('input_38');
+    const f53 = document.getElementById('input_53');
+    if (f3 && f38 && f53) {
+      clearDefaultErrors();
+      attachListeners();
+      runValidation();
+    } else {
+      // nếu chưa xong, thử lại sau 100ms
+      setTimeout(initWhenReady, 100);
+    }
+  }
+
+  // Khởi động polling
+  initWhenReady();
+
 window.addEventListener("message", function(e) {
     if (e.origin.indexOf("jotform") > -1 && e.data.type === "setHeight") {
       const id = "JotFormIFrame-" + 252484373306054;
@@ -170,3 +186,5 @@ window.addEventListener("message", function(e) {
       }
     }
   }, false);
+
+})();
