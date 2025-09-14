@@ -1058,41 +1058,25 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 })();
 </script>
 
+<!-- Auto-resize script -->
 <script>
 ;(function(){
-  console.log('[GH] Resize script loaded');
-
   function sendHeight() {
     var h = document.documentElement.scrollHeight;
-    console.log('[GH] Calculated scrollHeight =', h);
     parent.postMessage({ type: 'SOURCE_FORM_HEIGHT', height: h }, '*');
-    console.log('[GH] postMessage sent');
   }
 
-  window.addEventListener('load', function() {
-    console.log('[GH] window.load event');
-    sendHeight();
-  });
+  window.addEventListener('load', sendHeight);
 
   if ('ResizeObserver' in window) {
-    console.log('[GH] using ResizeObserver');
-    new ResizeObserver(function() {
-      console.log('[GH] ResizeObserver triggered');
-      sendHeight();
-    }).observe(document.body);
+    new ResizeObserver(sendHeight).observe(document.body);
   } else {
-    console.log('[GH] using MutationObserver');
-    new MutationObserver(function() {
-      console.log('[GH] MutationObserver triggered');
-      sendHeight();
-    }).observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true
-    });
+    new MutationObserver(sendHeight)
+      .observe(document.body, { childList:true, subtree:true, attributes:true });
   }
 })();
 </script>
+
 
 
 
