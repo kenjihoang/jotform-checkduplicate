@@ -1055,35 +1055,47 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     mo.observe(document.body, { childList: true, subtree: true });
   });
 	
-
-	function sendHeight() {
-        // Lấy tổng chiều cao nội dung
-        var h = document.documentElement.scrollHeight;
-        parent.postMessage({
-          type: 'SOURCE_FORM_HEIGHT',
-          height: h
-        }, '*');
-      }
-
-      // Khi load xong, gửi height
-      window.addEventListener('load', sendHeight);
-
-      // Quan sát mọi thay đổi DOM để cập nhật height
-      if ('ResizeObserver' in window) {
-        new ResizeObserver(sendHeight).observe(document.body);
-      } else {
-        var mo = new MutationObserver(sendHeight);
-        mo.observe(document.body, { childList:true, subtree:true, attributes:true });
-      }
-    })();
-
-
-
-
 })();
 
 	
 </script>
+
+<script>
+;(function(){
+  console.log('[GH] Resize script loaded');
+
+  function sendHeight() {
+    var h = document.documentElement.scrollHeight;
+    console.log('[GH] Calculated scrollHeight =', h);
+    parent.postMessage({ type: 'SOURCE_FORM_HEIGHT', height: h }, '*');
+    console.log('[GH] postMessage sent');
+  }
+
+  window.addEventListener('load', function() {
+    console.log('[GH] window.load event');
+    sendHeight();
+  });
+
+  if ('ResizeObserver' in window) {
+    console.log('[GH] using ResizeObserver');
+    new ResizeObserver(function() {
+      console.log('[GH] ResizeObserver triggered');
+      sendHeight();
+    }).observe(document.body);
+  } else {
+    console.log('[GH] using MutationObserver');
+    new MutationObserver(function() {
+      console.log('[GH] MutationObserver triggered');
+      sendHeight();
+    }).observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true
+    });
+  }
+})();
+</script>
+
 
 
 
