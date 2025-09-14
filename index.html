@@ -883,131 +883,143 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
 <script>
 ;(function(){
-  const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
-  const debounce  = (fn, ms=500) => {
-    let timer;
-    return (...args) => {
-      clearTimeout(timer);
-      timer = setTimeout(() => fn(...args), ms);
-    };
-  };
+  'use strict';
 
-  // Cấu hình mapping input → error message → page index → flag key trả về từ Worker
-  const config = [
-    { id: 'input_3',  errSel: '[name="ErrorMessage_EmailExists"]',   page: 2, key: 'emailExists' },
-    { id: 'input_38', errSel: '[name="ErrorMessage_PIDExists"]',     page: 2, key: 'personalIdExists' },
-    { id: 'input_53', errSel: '[name="ErrorMessage_SIDExists"]',     page: 3, key: 'studentIdExists' }
+  const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
+
+  // Map each field to its input ID, error selector, what page it's on, and which flag Worker returns
+  const fields = [
+    { id: 'input_3',  name: 'email',      errSel: '[name="ErrorMessage_EmailExists"]',   page: 2, flag: 'emailExists' },
+    { id: 'input_38', name: 'personalId', errSel: '[name="ErrorMessage_PIDExists"]',     page: 2, flag: 'personalIdExists' },
+    { id: 'input_53', name: 'studentId',  errSel: '[name="ErrorMessage_SIDExists"]',     page: 3, flag: 'studentIdExists' }
   ];
 
-  // Lấy nút Next/Submit đang visible trên page
-  function getActionBtn() {
-    const els = Array.from(
-      document.querySelectorAll('[id^="form-pagebreak-next_"], button[type="submit"], input[type="submit"]')
-    );
-    return els.find(btn => btn.offsetParent !== null);
+  // Utility: disable/enable the visible Next or Submit button
+  function toggleAction(disabled) {
+    const buttons = Array.from(
+      document.querySelectorAll(
+        '.form-pagebreak-next, button[type="submit"], input[type="submit"]'
+      )
+    ).filter(btn => btn.offsetParent !== null);
+    buttons.forEach(btn => btn.disabled = disabled);
   }
 
-  // Lấy số trang hiện tại dựa vào .jfActive
-  function currentPageIndex() {
-    const active = document.querySelector('.jfActive');
-    return active ? Number(active.textContent.trim()) : null;
+  // Utility: detect which page is currently visible
+  function getCurrentPage() {
+    const pages = document.querySelectorAll('.form-pagebreak-page');
+    for (let i = 0; i < pages.length; i++) {
+      if (pages[i].style.display !== 'none') {
+        return i + 1;  // pages are zero-indexed in DOM
+      }
+    }
+    return null;
   }
 
-  // Hàm chính: gọi Worker kiểm tra và cập nhật UI
+  // Core: fetch Worker and update UI
   async function runValidation() {
-    const page = currentPageIndex();
-    const btn  = getActionBtn();
+    const page = getCurrentPage();
 
-    // Nếu không phải page 2 hoặc 3 → reset error + bật nút
+    // If not on page 2 or 3, clear any errors and enable Next/Submit
     if (page !== 2 && page !== 3) {
-      config.forEach(c => {
-        const err = document.querySelector(c.errSel);
+      fields.forEach(f => {
+        const err = document.querySelector(f.errSel);
         if (err) err.style.display = 'none';
       });
-      if (btn) btn.disabled = false;
+      toggleAction(false);
       return;
     }
 
-    // Build payload chỉ với các field trên page đang active
+    // Build payload only for fields on the active page
     const payload = {};
-    config.filter(c => c.page === page).forEach(c => {
-      const inp = document.getElementById(c.id);
-      payload[c.key.replace('Exists','')] = inp ? inp.value.trim() : '';
+    const pageFields = fields.filter(f => f.page === page);
+    pageFields.forEach(f => {
+      const input = document.getElementById(f.id);
+      payload[f.name] = input ? input.value.trim() : '';
     });
 
-    // Nếu user chưa gõ gì → ẩn error + disable nút
-    if (Object.values(payload).every(v => !v)) {
-      config.filter(c => c.page === page).forEach(c => {
-        const err = document.querySelector(c.errSel);
+    // If user hasn't typed anything yet, hide page errors and disable Next
+    if (Object.values(payload).every(v => v === '')) {
+      pageFields.forEach(f => {
+        const err = document.querySelector(f.errSel);
         if (err) err.style.display = 'none';
       });
-      if (btn) btn.disabled = true;
+      toggleAction(true);
       return;
     }
 
-    // Gọi Worker
+    // Call your Worker
     let result = {};
     try {
       const res = await fetch(workerUrl, {
         method: 'POST',
-        headers: {'Content-Type':'application/json'},
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       result = await res.json();
-    } catch {
-      // Network/API lỗi → block luôn để an toàn
-      if (btn) btn.disabled = true;
+    } catch (e) {
+      // On network/API error, block progression
+      toggleAction(true);
       return;
     }
 
-    // Show/hide error và disable nút nếu có flag true
+    // Show or hide each error, determine if any flag is true
     let hasError = false;
-    config.filter(c => c.page === page).forEach(c => {
-      const err   = document.querySelector(c.errSel);
-      const exists = result[c.key];
+    pageFields.forEach(f => {
+      const err = document.querySelector(f.errSel);
+      const exists = result[f.flag];
       if (err) err.style.display = exists ? 'block' : 'none';
       if (exists) hasError = true;
     });
-    if (btn) btn.disabled = hasError;
+
+    toggleAction(hasError);
   }
 
-  // Debounce để check sau khi khách gõ xong
-  const debouncedRun = debounce(runValidation, 500);
-
-  // Bắt input event trên toàn body
-  document.body.addEventListener('input', e => {
-    if (['input_3','input_38','input_53'].includes(e.target.id)) {
-      debouncedRun();
-    }
-  });
-
-  // Bắt click Next để validate ngay sau khi page chuyển
-  document.body.addEventListener('click', e => {
-    if (e.target.matches('[id^="form-pagebreak-next_"]')) {
-      setTimeout(runValidation, 0);
-    }
-  });
-
-  // Khởi chạy khi form đã render xong
-  function onFormReady(cb) {
-    if (config.every(c => document.getElementById(c.id))) {
-      return cb();
-    }
-    setTimeout(() => onFormReady(cb), 100);
+  // Debounce utility to avoid hammering Worker on every keystroke
+  function debounce(fn, ms = 400) {
+    let t;
+    return (...args) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn(...args), ms);
+    };
   }
-  window.addEventListener('DOMContentLoaded', () => {
-    onFormReady(runValidation);
+  const debouncedRun = debounce(runValidation);
+
+  // Attach listeners once form is fully rendered
+  function init() {
+    // 1. Listen for user input on each field
+    fields.forEach(f => {
+      const input = document.getElementById(f.id);
+      if (!input) return;
+      input.addEventListener('input', debouncedRun);
+      input.addEventListener('change', runValidation);
+      input.addEventListener('blur', runValidation);
+    });
+
+    // 2. Observe page-change via style mutation on each page container
+    document.querySelectorAll('.form-pagebreak-page').forEach(pageEl => {
+      new MutationObserver(muts => {
+        muts.forEach(m => {
+          if (m.attributeName === 'style') {
+            runValidation();
+          }
+        });
+      }).observe(pageEl, { attributes: true });
+    });
+
+    // 3. Initial check
+    runValidation();
+  }
+
+  // Wait for JotForm Full Source to insert all fields into DOM
+  document.addEventListener('DOMContentLoaded', () => {
+    const checkInterval = setInterval(() => {
+      // Wait until at least the first tracked input exists
+      if (document.getElementById(fields[0].id)) {
+        clearInterval(checkInterval);
+        init();
+      }
+    }, 100);
   });
+
 })();
 </script>
-
-
-
-
-
-
-
-
-
-
-
