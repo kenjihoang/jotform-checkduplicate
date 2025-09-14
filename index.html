@@ -883,11 +883,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
 <script>
 ;(function(){
-  'use strict';
-
   const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
-
-  // cấu hình 3 field
   const fields = [
     { id: 'input_3',  errId: 'id_92', flag: 'emailExists',      page: 2 },
     { id: 'input_38', errId: 'id_93', flag: 'personalIdExists', page: 2 },
@@ -898,107 +894,87 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     let t;
     return (...args) => {
       clearTimeout(t);
-      t = setTimeout(()=>fn(...args), ms);
+      t = setTimeout(() => fn(...args), ms);
     };
   }
 
-  // Hiện / ẩn error y chang “This field is required”
   function showJotFormError(f, show) {
-    const inp   = document.getElementById(f.id);
-    if (!inp) return;
-    const lineLi = inp.closest('li.form-line');
-    if (!lineLi) return;
+    const input = document.getElementById(f.id);
+    const line  = input?.closest('li.form-line');
+    if (!input || !line) return;
 
-    // Lấy hoặc tạo container .form-error-message
-    let errDiv = lineLi.querySelector('.form-error-message');
-    if (!errDiv) {
-      errDiv = document.createElement('div');
-      errDiv.className = 'form-error-message';
-      errDiv.id = 'error_' + f.id;
-      inp.insertAdjacentElement('afterend', errDiv);
+    let errBox = line.querySelector('.form-error-message');
+    if (!errBox && show) {
+      errBox = document.createElement('div');
+      errBox.className = 'form-error-message';
+      errBox.id = 'error_' + f.id;
+      input.insertAdjacentElement('afterend', errBox);
     }
 
     if (show) {
-      // set text từ <li id="id_9x"> mà bạn đã tạo
-      const customText = document
-        .getElementById(f.errId)
-        .querySelector('.form-html')
-        .textContent
-        .trim();
-      errDiv.textContent = customText;
-
-      // gắn class JotForm
-      lineLi.classList.add('form-line-error');
-      inp.classList.add('form-validation-error');
+      const customText = document.getElementById(f.errId)?.innerText?.trim() || 'Duplicate entry';
+      errBox.textContent = customText;
+      line.classList.add('form-line-error');
+      input.classList.add('form-validation-error');
     } else {
-      // remove class + xóa text
-      lineLi.classList.remove('form-line-error');
-      inp.classList.remove('form-validation-error');
-      errDiv.textContent = '';
+      if (errBox) errBox.textContent = '';
+      line.classList.remove('form-line-error');
+      input.classList.remove('form-validation-error');
     }
   }
 
-  // enable/disable Next or Submit
   function toggleAction(disabled) {
     document.querySelectorAll(
       '.form-pagebreak-next, button[type="submit"], input[type="submit"]'
-    ).forEach(b=>{
-      if (b.offsetParent !== null) b.disabled = disabled;
+    ).forEach(btn => {
+      if (btn.offsetParent !== null) btn.disabled = disabled;
     });
   }
 
-  // tìm page hiện tại
   function getCurrentPage() {
     const pages = document.querySelectorAll('.form-pagebreak-page');
-    for (let i=0; i<pages.length; i++) {
-      if (pages[i].style.display !== 'none') return i+1;
+    for (let i = 0; i < pages.length; i++) {
+      if (pages[i].style.display !== 'none') return i + 1;
     }
     return null;
   }
 
-  // gọi Worker + cập nhật UI
   async function runValidation() {
     const page = getCurrentPage();
-
-    // nếu không phải page 2 hoặc 3 → clear all
     if (page !== 2 && page !== 3) {
       fields.forEach(f => showJotFormError(f, false));
       toggleAction(false);
       return;
     }
 
-    // build payload cho page đó
     const visible = fields.filter(f => f.page === page);
     const payload = {};
     visible.forEach(f => {
-      const v = document.getElementById(f.id)?.value.trim() || '';
-      payload[f.flag.replace(/Exists$/, '')] = v;
+      const val = document.getElementById(f.id)?.value.trim() || '';
+      payload[f.flag.replace(/Exists$/, '')] = val;
     });
 
-    // blank → hide + block
-    if (Object.values(payload).every(v=>!v)) {
+    // Nếu tất cả đều trống → không gọi Worker, không hiện lỗi
+    if (Object.values(payload).every(v => !v)) {
       visible.forEach(f => showJotFormError(f, false));
       toggleAction(true);
       return;
     }
 
-    console.log('📡 payload →', payload);
     let result = {};
     try {
       const res = await fetch(workerUrl, {
         method: 'POST',
-        headers: {'Content-Type':'application/json'},
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       result = await res.json();
-      console.log('📥 worker ↩︎', result);
-    } catch(e) {
+    } catch (e) {
       console.error('Worker error', e);
       toggleAction(true);
       return;
     }
 
-    // hiển thị lỗi duplicate như required
     let hasError = false;
     visible.forEach(f => {
       const exists = !!result[f.flag];
@@ -1008,30 +984,40 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     toggleAction(hasError);
   }
 
-  const deb = debounce(runValidation, 300);
+  const debouncedRun = debounce(runValidation);
 
-  window.addEventListener('load', () => {
-    // đợi form cắm xong
-    const chk = setInterval(()=>{
-      if (fields.some(f=>document.getElementById(f.id))) {
-        clearInterval(chk);
-        // lắng nghe input
-        document.body.addEventListener('input', e=>{
-          if (fields.map(f=>f.id).includes(e.target.id)) deb();
+  function attachListeners() {
+    document.body.addEventListener('input', e => {
+      if (fields.map(f => f.id).includes(e.target.id)) {
+        debouncedRun();
+      }
+    });
+
+    document.body.addEventListener('click', e => {
+      if (e.target.closest('.form-pagebreak-next, button[type="submit"], input[type="submit"]')) {
+        setTimeout(runValidation, 0);
+      }
+    });
+
+    document.querySelectorAll('.form-pagebreak-page').forEach(pageEl => {
+      new MutationObserver(muts => {
+        muts.forEach(m => {
+          if (m.attributeName === 'style') runValidation();
         });
-        // lắng nghe click Next/Submit
-        document.body.addEventListener('click', e=>{
-          if (e.target.closest('.form-pagebreak-next, button[type="submit"], input[type="submit"]')) {
-            setTimeout(runValidation,0);
-          }
-        });
+      }).observe(pageEl, { attributes: true });
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const observer = new MutationObserver(() => {
+      if (fields.every(f => document.getElementById(f.id))) {
+        observer.disconnect();
+        attachListeners();
         runValidation();
       }
-    }, 100);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
   });
 })();
 </script>
-
-
-
 
