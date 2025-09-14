@@ -887,23 +887,42 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
   const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
 
-  // Khai báo 3 field cần track
+  // map mỗi field với input ID, lỗi <li> ID, flag từ Worker & page index
   const fields = [
-    { id: 'input_3',  name: 'email',      errSel: '[name="ErrorMessage_EmailExists"]',   flag: 'emailExists'      },
-    { id: 'input_38', name: 'personalId', errSel: '[name="ErrorMessage_PIDExists"]',     flag: 'personalIdExists' },
-    { id: 'input_53', name: 'studentId',  errSel: '[name="ErrorMessage_SIDExists"]',     flag: 'studentIdExists'  }
+    { id: 'input_3',  errId: 'id_92', flag: 'emailExists',      page: 2 },
+    { id: 'input_38', errId: 'id_93', flag: 'personalIdExists', page: 2 },
+    { id: 'input_53', errId: 'id_94', flag: 'studentIdExists',  page: 3 }
   ];
 
-  // Debounce helper
-  function debounce(fn, ms = 400) {
+  // debounce helper
+  function debounce(fn, ms = 300) {
     let t;
-    return (...args) => {
+    return (...a) => {
       clearTimeout(t);
-      t = setTimeout(() => fn(...args), ms);
+      t = setTimeout(() => fn(...a), ms);
     };
   }
 
-  // Bật/tắt nút Next hoặc Submit đang visible
+  // style y chang JotForm “required” error
+  function showDuplicateError(f, show) {
+    const liField = document.getElementById(f.id).closest('li');
+    const inp     = document.getElementById(f.id);
+    const errLi   = document.getElementById(f.errId);
+
+    if (show) {
+      liField.classList.add('form-line-error');
+      inp.classList.add('form-validation-error');
+      errLi.classList.remove('always-hidden','form-field-hidden');
+      errLi.style.display = '';
+    } else {
+      liField.classList.remove('form-line-error');
+      inp.classList.remove('form-validation-error');
+      errLi.classList.add('always-hidden','form-field-hidden');
+      errLi.style.display = 'none';
+    }
+  }
+
+  // bật/tắt Next/Submit
   function toggleAction(disabled) {
     document.querySelectorAll(
       '.form-pagebreak-next, button[type="submit"], input[type="submit"]'
@@ -912,100 +931,89 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
   }
 
-  // Hàm gọi Worker và cập nhật UI
-  async function runValidation() {
-    // 1) Tìm những field đang visible (trên page 2 hoặc 3)
-    const visible = fields.filter(f => {
-      const el = document.getElementById(f.id);
-      return el && el.offsetParent !== null;
-    });
+  // phát hiện page hiện tại
+  function getCurrentPage() {
+    const pages = document.querySelectorAll('.form-pagebreak-page');
+    for (let i = 0; i < pages.length; i++) {
+      if (pages[i].style.display !== 'none') return i + 1;
+    }
+    return null;
+  }
 
-    // 2) Nếu none → reset lỗi và enable nút
-    if (visible.length === 0) {
-      fields.forEach(f => {
-        const err = document.querySelector(f.errSel);
-        if (err) err.style.display = 'none';
-      });
+  // core validation
+  async function runValidation() {
+    const page = getCurrentPage();
+
+    // nếu không phải page 2/3 → remove tất cả error, enable nút
+    if (page !== 2 && page !== 3) {
+      fields.forEach(f => showDuplicateError(f, false));
       toggleAction(false);
       return;
     }
 
-    // 3) Build payload chỉ với những field visible
+    // chỉ payload cho các field trên page đó
+    const visible = fields.filter(f => f.page === page);
     const payload = {};
     visible.forEach(f => {
-      const val = document.getElementById(f.id).value.trim();
-      payload[f.name] = val;
+      const v = document.getElementById(f.id)?.value.trim() || '';
+      payload[f.flag.replace(/Exists$/,'')] = v;
     });
 
-    // 4) Nếu chưa gõ gì → ẩn lỗi + block nút Next
-    if (Object.values(payload).every(v => !v)) {
-      visible.forEach(f => {
-        const err = document.querySelector(f.errSel);
-        if (err) err.style.display = 'none';
-      });
+    // nếu blank → hide error + disable Next
+    if (Object.values(payload).every(x => !x)) {
+      visible.forEach(f => showDuplicateError(f, false));
       toggleAction(true);
       return;
     }
 
-    // 5) Gọi Worker
-    console.log('📡 Sending to worker:', payload);
+    console.log('📡 payload →', payload);
     let result = {};
     try {
-      const resp = await fetch(workerUrl, {
+      const res = await fetch(workerUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {'Content-Type':'application/json'},
         body: JSON.stringify(payload)
       });
-      result = await resp.json();
-      console.log('📥 Worker response:', result);
+      result = await res.json();
+      console.log('📥 worker ↩︎', result);
     } catch (e) {
-      console.error('Worker fetch error', e);
+      console.error('Worker error', e);
       toggleAction(true);
       return;
     }
 
-    // 6) Show/hide error & disable nút nếu có lỗi
+    // show/hide duplicate error & disable if có lỗi
     let hasError = false;
     visible.forEach(f => {
-      const err = document.querySelector(f.errSel);
       const exists = !!result[f.flag];
-      if (err) err.style.display = exists ? 'block' : 'none';
+      showDuplicateError(f, exists);
       if (exists) hasError = true;
     });
     toggleAction(hasError);
   }
 
-  // 7) Gắn listener input + click pagebreak
-  const debRun = debounce(runValidation, 400);
+  // debounce wrapper
+  const deb = debounce(runValidation, 300);
 
-  function attachListeners() {
-    fields.forEach(f => {
-      const inp = document.getElementById(f.id);
-      if (!inp) return;
-      inp.addEventListener('input', debRun);
-      inp.addEventListener('blur', runValidation);
-    });
-
-    // Khi click Next hoặc Submit
-    document.addEventListener('click', e => {
-      if (e.target.closest('.form-pagebreak-next, button[type="submit"], input[type="submit"]')) {
-        // delay để form vừa chuyển page xong
-        setTimeout(runValidation, 0);
-      }
-    });
-  }
-
-  // 8) Chờ form load xong, then init
+  // gắn listeners khi form fully loaded
   window.addEventListener('load', () => {
-    const wait = setInterval(() => {
-      // chờ đủ 3 input xuất hiện
-      if (fields.every(f => document.getElementById(f.id))) {
-        clearInterval(wait);
-        attachListeners();
+    const check = setInterval(() => {
+      if (fields.some(f => document.getElementById(f.id))) {
+        clearInterval(check);
+
+        document.body.addEventListener('input', e => {
+          if (fields.map(f => f.id).includes(e.target.id)) deb();
+        });
+        document.body.addEventListener('click', e => {
+          if (e.target.closest('.form-pagebreak-next, button[type="submit"], input[type="submit"]')) {
+            setTimeout(runValidation, 0);
+          }
+        });
+
         runValidation();
       }
     }, 100);
   });
-
 })();
 </script>
+
