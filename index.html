@@ -923,60 +923,63 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 </style>
 
 <script>
-  ;(function(){
-    const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
+;(function(){
+  const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
+  const debounce = (fn, ms = 500) => {
+    let timer;
+    return (...args) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn(...args), ms);
+    };
+  };
 
-    // Debounce helper
-    function debounce(fn, ms = 500) {
-      let timer;
-      return (...args) => {
-        clearTimeout(timer);
-        timer = setTimeout(() => fn(...args), ms);
-      };
-    }
+  // Đợi form render xong (chờ #input_3 xuất hiện)
+  function onFormReady(cb) {
+    if (document.querySelector('#input_3')) cb();
+    else setTimeout(() => onFormReady(cb), 100);
+  }
 
-    // Map mỗi field với thẻ error tương ứng
-    const config = [
-      {
-        inputEl: document.querySelector('#input_3'),                          // email
-        errorEl: document.querySelector('[name="ErrorMessage_EmailExists"]')
-      },
-      {
-        inputEl: document.querySelector('#input_38'),                         // personalId
-        errorEl: document.querySelector('[name="ErrorMessage_PIDExists"]')
-      },
-      {
-        inputEl: document.querySelector('#input_53'),                         // studentId
-        errorEl: document.querySelector('[name="ErrorMessage_SIDExists"]')
-      }
-    ];
+  onFormReady(() => {
+    // Các field và error message elements
+    const emailEl    = document.querySelector('#input_3');
+    const pidEl      = document.querySelector('#input_38');
+    const sidEl      = document.querySelector('#input_53');
+    const emailErr   = document.querySelector('[name="ErrorMessage_EmailExists"]');
+    const pidErr     = document.querySelector('[name="ErrorMessage_PIDExists"]');
+    const sidErr     = document.querySelector('[name="ErrorMessage_SIDExists"]');
 
-    // Chỉ lấy nút Next của page 2, page 3 và nút Submit cuối
-    const actionButtons = [
-      document.querySelector('#form-pagebreak-next_39'),
-      document.querySelector('#form-pagebreak-next_55'),
-      document.querySelector('button[type="submit"], input[type="submit"]')
-    ].filter(Boolean);
+    // Chỉ select nút Next trang 2, Next trang 3 và nút Submit cuối
+    const next2      = document.querySelector('#form-pagebreak-next_39');
+    const next3      = document.querySelector('#form-pagebreak-next_55');
+    const submitBtn  = document.querySelector('button[type="submit"], input[type="submit"]');
+    const actionBtns = [next2, next3, submitBtn].filter(Boolean);
 
-    // Ẩn toàn bộ error + disable những nút này ban đầu
-    config.forEach(c => { if (c.errorEl) c.errorEl.style.display = 'none'; });
-    actionButtons.forEach(btn => btn.disabled = true);
+    // Ban đầu: ẩn error + disable tất cả actionBtns
+    [emailErr, pidErr, sidErr].forEach(el => { if (el) el.style.display = 'none'; });
+    actionBtns.forEach(btn => btn.disabled = true);
 
-    function setActionsDisabled(disabled) {
-      actionButtons.forEach(btn => btn.disabled = disabled);
-    }
+    // Chặn click nếu btn.disabled
+    actionBtns.forEach(btn => {
+      btn.addEventListener('click', e => {
+        if (btn.disabled) {
+          e.preventDefault();
+          btn.focus();
+        }
+      });
+    });
 
+    // Đưa lên worker và xử lý response
     async function runValidation() {
       const payload = {
-        email:      config[0].inputEl?.value.trim() || '',
-        personalId: config[1].inputEl?.value.trim() || '',
-        studentId:  config[2].inputEl?.value.trim() || ''
+        email:      emailEl.value.trim(),
+        personalId: pidEl.value.trim(),
+        studentId:  sidEl.value.trim()
       };
 
-      // Nếu chưa nhập gì → ẩn message + disable only page2&3+submit
+      // Nếu 3 field đều rỗng → ẩn error + disable Next2/Next3/Submit
       if (!payload.email && !payload.personalId && !payload.studentId) {
-        config.forEach(c => { if (c.errorEl) c.errorEl.style.display = 'none'; });
-        setActionsDisabled(true);
+        [emailErr, pidErr, sidErr].forEach(el => { if (el) el.style.display = 'none'; });
+        actionBtns.forEach(btn => btn.disabled = true);
         return;
       }
 
@@ -986,49 +989,37 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        const json = await res.json();
+        const { emailExists, personalIdExists, studentIdExists } = await res.json();
 
-        // Show/hide error
-        if (config[0].errorEl) config[0].errorEl.style.display = json.emailExists       ? 'block' : 'none';
-        if (config[1].errorEl) config[1].errorEl.style.display = json.personalIdExists  ? 'block' : 'none';
-        if (config[2].errorEl) config[2].errorEl.style.display = json.studentIdExists   ? 'block' : 'none';
+        // Show/hide error messages
+        if (emailErr) emailErr.style.display = emailExists ? 'block' : 'none';
+        if (pidErr)   pidErr.style.display   = personalIdExists ? 'block' : 'none';
+        if (sidErr)   sidErr.style.display   = studentIdExists  ? 'block' : 'none';
 
-        // Disable chỉ nếu có lỗi
-        const hasError = json.emailExists || json.personalIdExists || json.studentIdExists;
-        setActionsDisabled(hasError);
+        // Disable nếu có lỗi nào
+        const hasError = emailExists || personalIdExists || studentIdExists;
+        actionBtns.forEach(btn => btn.disabled = hasError);
+
       } catch {
-        // Lỗi network → disable an toàn
-        setActionsDisabled(true);
+        // Network error → lock lại để an toàn
+        actionBtns.forEach(btn => btn.disabled = true);
       }
     }
 
+    // Debounce trước khi gọi runValidation
     const debouncedValidate = debounce(runValidation, 500);
 
-    // Chặn click khi disabled
-    function blockDisabledClicks(btn) {
-      btn.addEventListener('click', e => {
-        if (btn.disabled) {
-          e.preventDefault();
-          btn.focus();
-        }
-      });
-    }
-
-    // Khi form load xong
-    window.addEventListener('DOMContentLoaded', () => {
-      // Gắn event input chỉ lên 3 field để validate
-      config.forEach(c => {
-        if (c.inputEl) c.inputEl.addEventListener('input', debouncedValidate);
-      });
-
-      // Chặn click cho page2, page3 Next và Submit khi disabled
-      actionButtons.forEach(blockDisabledClicks);
-
-      // Chạy lần đầu để set trạng thái nút chính xác
-      runValidation();
+    // Gắn listener input
+    [emailEl, pidEl, sidEl].forEach(el => {
+      if (el) el.addEventListener('input', debouncedValidate);
     });
-  })();
-  </script>
+
+    // Chạy lần đầu để set trạng thái nút chính xác
+    runValidation();
+  });
+})();
+</script>
+
 
 
 
