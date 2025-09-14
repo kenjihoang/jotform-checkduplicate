@@ -923,69 +923,114 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 </style>
 
 <script>
-const API_URL = 'https://script.google.com/macros/s/AKfycbzxLAp22vlfPiX-37eP8IooCnRuO9FTwX_8ZgZwAPXIhR1LVKZPBq5I9CIgK_BlB9C1/exec';
+  ;(function(){
+    // Endpoint Cloudflare Worker của bạn
+    const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
 
-const FIELD_MAP = {
-  email:      { id: '#input_3',  errorName: 'ErrorMessage_EmailExists', exists: false },
-  personalId: { id: '#input_38', errorName: 'ErrorMessage_PIDExists',   exists: false },
-  studentId:  { id: '#input_53', errorName: 'ErrorMessage_SIDExists',   exists: false }
-};
+    // Debounce helper
+    function debounce(fn, ms = 500) {
+      let timer;
+      return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), ms);
+      };
+    }
 
-function showError(name) {
-  const el = document.querySelector(`[name="${name}"]`);
-  if (el) el.closest('.form-line').style.display = 'block';
-}
-function hideError(name) {
-  const el = document.querySelector(`[name="${name}"]`);
-  if (el) el.closest('.form-line').style.display = 'none';
-}
+    // Định nghĩa các field và thẻ error tương ứng
+    const config = [
+      {
+        inputEl: document.querySelector('#input_3'),                          // email
+        errorEl: document.querySelector('[name="ErrorMessage_EmailExists"]')
+      },
+      {
+        inputEl: document.querySelector('#input_38'),                         // personalId
+        errorEl: document.querySelector('[name="ErrorMessage_PIDExists"]')
+      },
+      {
+        inputEl: document.querySelector('#input_53'),                         // studentId
+        errorEl: document.querySelector('[name="ErrorMessage_SIDExists"]')
+      }
+    ];
 
-async function checkExists(fieldKey, value) {
-  if (!value) {
-    FIELD_MAP[fieldKey].exists = false;
-    hideError(FIELD_MAP[fieldKey].errorName);
-    return;
-  }
-  try {
-    const res = await fetch(API_URL, {
-      method: 'POST',
-      mode: 'cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ [fieldKey]: value })
+    // Tất cả nút Next (pagebreak) và nút Submit cuối cùng
+    const actionButtons = [
+      ...document.querySelectorAll('[id^="form-pagebreak-next_"]'),
+      document.querySelector('button[type="submit"], input[type="submit"]')
+    ].filter(Boolean);
+
+    // Ẩn tất cả error, disable buttons ngay từ đầu
+    config.forEach(c => { if (c.errorEl) c.errorEl.style.display = 'none'; });
+    actionButtons.forEach(btn => { btn.disabled = true; });
+
+    // Hàm bật/tắt Next & Submit
+    function setActionsDisabled(disabled) {
+      actionButtons.forEach(btn => { btn.disabled = disabled; });
+    }
+
+    // Hàm gọi Worker, xử lý kết quả
+    async function runValidation() {
+      const payload = {
+        email:      config[0].inputEl?.value.trim() || '',
+        personalId: config[1].inputEl?.value.trim() || '',
+        studentId:  config[2].inputEl?.value.trim() || ''
+      };
+
+      // Nếu chưa nhập gì → ẩn error + disable
+      if (!payload.email && !payload.personalId && !payload.studentId) {
+        config.forEach(c => { if (c.errorEl) c.errorEl.style.display = 'none'; });
+        setActionsDisabled(true);
+        return;
+      }
+
+      try {
+        const res  = await fetch(workerUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const json = await res.json();
+
+        // Show/hide từng message
+        if (config[0].errorEl) config[0].errorEl.style.display = json.emailExists      ? 'block' : 'none';
+        if (config[1].errorEl) config[1].errorEl.style.display = json.personalIdExists ? 'block' : 'none';
+        if (config[2].errorEl) config[2].errorEl.style.display = json.studentIdExists  ? 'block' : 'none';
+
+        // Disable nếu có bất kỳ lỗi
+        const hasError = json.emailExists || json.personalIdExists || json.studentIdExists;
+        setActionsDisabled(hasError);
+
+      } catch (err) {
+        // Lỗi mạng → tạm disable để an toàn
+        setActionsDisabled(true);
+      }
+    }
+
+    const debouncedValidate = debounce(runValidation, 500);
+
+    // Chặn click lên nút đang disabled
+    function blockDisabledClicks(btn) {
+      btn.addEventListener('click', e => {
+        if (btn.disabled) {
+          e.preventDefault();
+          btn.focus();
+        }
+      });
+    }
+
+    // Khởi tạo khi form load xong
+    window.addEventListener('DOMContentLoaded', () => {
+      // Gắn event input → validate
+      config.forEach(c => {
+        if (c.inputEl) c.inputEl.addEventListener('input', debouncedValidate);
+      });
+
+      // Chặn click trên tất cả action buttons khi disabled
+      actionButtons.forEach(blockDisabledClicks);
+
+      // Chạy lần đầu để set trạng thái button
+      runValidation();
     });
-    const data = await res.json();
-    const flag = fieldKey + 'Exists';
-    if (data[flag]) {
-      FIELD_MAP[fieldKey].exists = true;
-      showError(FIELD_MAP[fieldKey].errorName);
-    } else {
-      FIELD_MAP[fieldKey].exists = false;
-      hideError(FIELD_MAP[fieldKey].errorName);
-    }
-  } catch (err) {
-    console.error('API error:', err);
-  }
-}
+  })();
+  </script>
 
-// Gắn blur event
-Object.keys(FIELD_MAP).forEach(key => {
-  const input = document.querySelector(FIELD_MAP[key].id);
-  if (input) {
-    input.addEventListener('blur', () => {
-      checkExists(key, input.value.trim());
-    });
-  }
-});
 
-// Chặn Next nếu có lỗi
-document.querySelectorAll('[id^="form-pagebreak-next_"]').forEach(btn => {
-  btn.addEventListener('click', e => {
-    if (btn.id === 'form-pagebreak-next_39') {
-      if (FIELD_MAP.email.exists || FIELD_MAP.personalId.exists) e.preventDefault();
-    }
-    if (btn.id === 'form-pagebreak-next_55') {
-      if (FIELD_MAP.studentId.exists) e.preventDefault();
-    }
-  });
-});
-</script>
