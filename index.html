@@ -1054,10 +1054,12 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
     mo.observe(document.body, { childList: true, subtree: true });
   });
-
-})();
-
-window.addEventListener("message", function(e) {
+	window.addEventListener("message", function(e) {
+      if (e.data.type === "SOURCE_FORM_HEIGHT") {
+        parent.postMessage(e.data, "*");
+      }
+    });
+	window.addEventListener("message", function(e) {
   if (e.origin.includes("jotform") && e.data.type==="setHeight") {
     // Resize inner iframe
     var inner = document.querySelector('iframe[id^="JotFormIFrame"]');
@@ -1067,8 +1069,13 @@ window.addEventListener("message", function(e) {
   }
 }, false);
 
+
+
+})();
+
 	
 </script>
+
 
 
 
