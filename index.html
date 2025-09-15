@@ -963,49 +963,47 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
   // 5) Chạy kiểm tra duplicate
   async function runValidation() {
-    const visible = fields.filter(f => {
-      const inp = document.getElementById(f.id);
-      return inp && inp.offsetParent !== null;
-    });
+  const visible = fields.filter(f => {
+    const inp = document.getElementById(f.id);
+    return inp && inp.offsetParent !== null;
+  });
 
-    if (visible.length === 0) {
-      fields.forEach(f => showDuplicateError(f, false));
-      toggleAction(false);
-      return;
-    }
-
-    const payload = visible.reduce((acc, f) => {
-      acc[f.flag.replace(/Exists$/, '')] = document.getElementById(f.id).value.trim();
-      return acc;
-    }, {});
-
-    if (Object.values(payload).every(v => !v)) {
-      visible.forEach(f => showDuplicateError(f, false));
-      toggleAction(true);
-      return;
-    }
-
-    let result = {};
-    try {
-      const res = await fetch(workerUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      result = await res.json();
-    } catch {
-      toggleAction(true);
-      return;
-    }
-
-    let hasError = false;
-    visible.forEach(f => {
-      const exists = !!result[f.flag];
-      showDuplicateError(f, exists);
-      if (exists) hasError = true;
-    });
-    toggleAction(hasError);
+  if (visible.length === 0) {
+    fields.forEach(f => showDuplicateError(f, false));
+    return; // ✅ Không chặn Next, để JotForm xử lý required
   }
+
+  const payload = visible.reduce((acc, f) => {
+    acc[f.flag.replace(/Exists$/, '')] = document.getElementById(f.id).value.trim();
+    return acc;
+  }, {});
+
+  if (Object.values(payload).every(v => !v)) {
+    visible.forEach(f => showDuplicateError(f, false));
+    return; // ✅ Không chặn Next nếu chưa nhập gì
+  }
+
+  let result = {};
+  try {
+    const res = await fetch(workerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    result = await res.json();
+  } catch {
+    return; // ✅ Không chặn Next nếu lỗi mạng
+  }
+
+  let hasError = false;
+  visible.forEach(f => {
+    const exists = !!result[f.flag];
+    showDuplicateError(f, exists);
+    if (exists) hasError = true;
+  });
+
+  toggleAction(hasError); // ✅ Chỉ chặn nếu có lỗi duplicate
+}
 
   const debouncedRun = debounce(runValidation, 300);
 
@@ -1076,6 +1074,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   }
 })();
 </script>
+
 
 
 
