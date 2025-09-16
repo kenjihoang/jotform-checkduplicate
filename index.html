@@ -907,7 +907,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   }
 
   // 2) Debounce helper
-  function debounce(fn, ms = 300) {
+  function debounce(fn, ms = 100) {
     let timer;
     return (...args) => {
       clearTimeout(timer);
@@ -995,7 +995,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   toggleAction(hasError); // ✅ Chỉ chặn nếu có lỗi duplicate
 }
 
-  const debouncedRun = debounce(runValidation, 300);
+  const debouncedRun = debounce(runValidation, 100);
 
   // 6) Gắn listener & block space
   function attachListeners() {
@@ -1064,6 +1064,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   }
 })();
 </script>
+
 
 
 
