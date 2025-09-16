@@ -933,8 +933,6 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 ;(function(){
   'use strict';
 
-  // LƯU Ý: guard global đã bị loại bỏ theo yêu cầu
-
   const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
   const fields = [
     { id: 'input_3',  errId: 'id_92', flag: 'emailExists'      },
@@ -946,8 +944,16 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   function $(id){ return document.getElementById(id); }
   function isVisible(el){ return el && el.offsetParent !== null; }
 
-  // Clear default errors but DO NOT remove our dup-error boxes
+  // state flags
+  let currentController = null;
+  let pending = false;
+  let lastResult = {};
+  let lastPayload = {};
+  let suppressClear = false; // <-- new: suppress clearing dup UI while awaiting server
+
+  // 1) Clear default errors but DO NOT remove our dup-error boxes and respect suppressClear
   function clearDefaultErrors(forceRemove = true) {
+    if (suppressClear) return;
     fields.forEach(f => {
       const inp = $(f.id);
       const li  = inp && typeof inp.closest === 'function' ? inp.closest('li.form-line') : null;
@@ -958,7 +964,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
         Array.from(li.children).forEach(child => {
           if (!child || !child.classList) return;
           if (!child.classList.contains('form-error-message')) return;
-          if (child.id && child.id.indexOf('dup-error-') === 0) return;
+          if (child.id && child.id.indexOf('dup-error-') === 0) return; // protect dup boxes
           child.remove();
         });
         const dupBox = document.getElementById('dup-error-' + f.id);
@@ -992,6 +998,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
   }
 
+  // debounce helper
   function debounce(fn, ms = 200) {
     let timer;
     return (...args) => {
@@ -1000,6 +1007,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     };
   }
 
+  // 2) Show / hide duplicate error for a tracked field
   function showDuplicateError(f, show) {
     const inp = $(f.id);
     const li  = inp && typeof inp.closest === 'function' ? inp.closest('li.form-line') : null;
@@ -1034,16 +1042,13 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     }
   }
 
+  // 3) Enable/disable Next & Submit buttons that are visible
   function toggleAction(disabled) {
     document.querySelectorAll('.form-pagebreak-next, button[type="submit"], input[type="submit"]')
       .forEach(btn => { if (btn.offsetParent !== null) btn.disabled = disabled; });
   }
 
-  let currentController = null;
-  let pending = false;
-  let lastResult = {};
-  let lastPayload = {};
-
+  // read visible tracked fields and return payload with whitespace stripped
   function readVisibleValues() {
     const visible = fields.filter(f => {
       const inp = $(f.id);
@@ -1059,7 +1064,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     return { visible, payload };
   }
 
-  // runValidation(finalCheck=false, forceRun=false)
+  // 4) runValidation(finalCheck=false, forceRun=false)
   async function runValidation(finalCheck = false, forceRun = false) {
     const { visible, payload } = readVisibleValues();
 
@@ -1086,7 +1091,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       let hasError = false;
       visible.forEach(f => {
         const exists = !!lastResult[f.flag];
-        showDuplicateError(f, exists);
+        showDuplicateError(f, exists); // reapply existing UI, do not prematurely clear
         if (exists) hasError = true;
       });
       toggleAction(hasError);
@@ -1098,10 +1103,13 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       currentController = null;
     }
 
-    // normalize payload
+    // normalize payload before sending
     Object.keys(payload).forEach(k => {
       if (typeof payload[k] === 'string') payload[k] = payload[k].trim().toLowerCase();
     });
+
+    // while waiting, prevent clearDefaultErrors from removing dup boxes
+    suppressClear = true;
 
     currentController = new AbortController();
     const signal = currentController.signal;
@@ -1124,7 +1132,11 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       currentController = null;
       pending = false;
 
-      if (!res.ok) { toggleAction(false); return; }
+      if (!res.ok) {
+        suppressClear = false;
+        toggleAction(false);
+        return;
+      }
 
       const result = await res.json();
       lastResult = result || {};
@@ -1143,16 +1155,19 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       }
 
       toggleAction(hasError);
+      suppressClear = false;
       return;
     } catch (err) {
       clearTimeout(timeoutId);
       if (err && err.name === 'AbortError') {
         pending = false;
         currentController = null;
+        suppressClear = false;
         return;
       }
       pending = false;
       currentController = null;
+      suppressClear = false;
       toggleAction(false);
       return;
     }
@@ -1160,6 +1175,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
   const debouncedRun = debounce(() => runValidation(false, false), 200);
 
+  // 5) Attach listeners (blur forces recheck and suppress clear while waiting)
   function attachListeners() {
     // input: keep debounce, do not force clear UI
     document.body.addEventListener('input', e => {
@@ -1168,9 +1184,15 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       debouncedRun();
     });
 
-    // blur: force recheck (forceRun = true) so each blur triggers server check
+    // blur: force recheck and suppress clear until server responds
     document.body.addEventListener('blur', e => {
-      if (fields.some(f => f.id === e.target.id)) runValidation(false, true);
+      if (!fields.some(f => f.id === e.target.id)) return;
+      // if there's already a dup box, keep it visible until validation completes
+      suppressClear = true;
+      (async () => {
+        await runValidation(false, true);
+        suppressClear = false;
+      })();
     }, true);
 
     // click Next/Submit: finalCheck + forceRun
@@ -1192,7 +1214,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       })();
     });
 
-    // block space key + paste normalization
+    // block space key + paste normalization for tracked fields
     fields.forEach(f => {
       const inp = $(f.id);
       if (!inp) return;
@@ -1200,14 +1222,13 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       inp.addEventListener('paste', () => {
         setTimeout(() => {
           inp.value = (inp.value || '').replace(/\s+/g, '');
-          // after paste do force recheck
           runValidation(false, true);
         }, 0);
       });
     });
   }
 
-  // Safe observe + init (throttled)
+  // Safe observe + init (throttled key-based)
   function observePageChanges() {
     const form = document.querySelector('form');
     if (!form) return;
@@ -1242,7 +1263,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     setTimeout(() => { try { clearDefaultErrors(true); } catch(e){} }, 300);
   }
 
-  // Init: wait for fields or timeout
+  // Init: wait for fields to appear or timeout
   document.addEventListener('DOMContentLoaded', () => {
     const start = Date.now();
     const MAX_WAIT = 5000;
@@ -1260,7 +1281,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 })();
 </script>
 
-<!-- Auto-resize -->
+<!-- Auto-resize: gửi height lên parent -->
 <script>
 ;(function(){
   function sendHeight() {
