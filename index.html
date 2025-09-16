@@ -925,7 +925,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   }
 
   // 2) Debounce helper
-  function debounce(fn, ms = 200) {
+  function debounce(fn, ms = 300) {
     let timer;
     return (...args) => {
       clearTimeout(timer);
@@ -1111,7 +1111,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     }
   }
 
-  const debouncedRun = debounce(() => runValidation(false), 200);
+  const debouncedRun = debounce(() => runValidation(false), 300);
 
   // 6) Attach listeners & block space/paste normalization
   function attachListeners() {
@@ -1233,3 +1233,4 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   setTimeout(sendHeight, 1200);
 })();
 </script>
+
