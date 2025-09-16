@@ -899,27 +899,33 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   function isVisible(el){ return el && el.offsetParent !== null; }
 
   // 1) Xóa lỗi đỏ mặc định của JotForm trên các field track
-  //    Chỉ xóa nếu field hiện tại hợp lệ theo HTML5 (dùng 1 lần khi init)
-  function clearDefaultErrors() {
+  //    forceRemove = true => remove mọi lỗi (dùng khi init / page change)
+  //    forceRemove = false => chỉ remove nếu field.native valid
+  function clearDefaultErrors(forceRemove = true) {
     fields.forEach(f => {
       const inp = $(f.id);
       const li  = inp?.closest('li.form-line');
       if (!li || !inp) return;
       try {
-        if (typeof inp.checkValidity === 'function' && inp.checkValidity()) {
+        if (forceRemove || (typeof inp.checkValidity === 'function' && inp.checkValidity())) {
           li.classList.remove('form-line-error');
           inp.classList.remove('form-validation-error');
           inp.removeAttribute('aria-invalid');
           li.querySelectorAll('.form-error-message').forEach(el => el.remove());
         }
       } catch (e) {
-        // fallback: nếu checkValidity lỗi, không xóa
+        if (forceRemove) {
+          li.classList.remove('form-line-error');
+          inp.classList.remove('form-validation-error');
+          inp.removeAttribute('aria-invalid');
+          li.querySelectorAll('.form-error-message').forEach(el => el.remove());
+        }
       }
     });
   }
 
   // 2) Debounce helper
-  function debounce(fn, ms = 300) {
+  function debounce(fn, ms = 200) {
     let timer;
     return (...args) => {
       clearTimeout(timer);
@@ -949,16 +955,15 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       inp.classList.add('form-validation-error');
       inp.setAttribute('aria-invalid', 'true');
     } else if (box) {
-      // Remove only if native validity OK; otherwise keep showing appropriate invalid state
+      // Remove only if native validity OK; otherwise remove duplicate box but keep native invalid state
       try {
         if (typeof inp.checkValidity === 'function' && !inp.checkValidity()) {
-          // native invalid (e.g., required/pattern): keep aria-invalid true, remove duplicate box if present
-          // but do not clear native classes here (allow JotForm to show native error)
+          // native invalid: remove duplicate message but keep native invalid classes (do not remove classes)
           box.remove();
           return;
         }
       } catch (e) {
-        // on error, proceed to safe remove
+        // proceed to safe remove if error
       }
 
       // safe to remove duplicate message and classes
@@ -1023,9 +1028,8 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       return;
     }
 
-    // if same payload as last successful check and not pending, reuse lastResult
+    // reuse cached result if same payload and not pending and not finalCheck
     if (!finalCheck && !pending && JSON.stringify(payload) === JSON.stringify(lastPayload)) {
-      // use cached result
       let hasError = false;
       visible.forEach(f => {
         const exists = !!lastResult[f.flag];
@@ -1066,7 +1070,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       pending = false;
 
       if (!res.ok) {
-        // server/network error -> permissive: don't block next, but keep existing duplicate boxes
+        // server/network error -> permissive: don't block next, keep existing duplicate boxes
         toggleAction(false);
         return;
       }
@@ -1107,7 +1111,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     }
   }
 
-  const debouncedRun = debounce(() => runValidation(false), 300);
+  const debouncedRun = debounce(() => runValidation(false), 200);
 
   // 6) Attach listeners & block space/paste normalization
   function attachListeners() {
@@ -1118,14 +1122,11 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       // immediate strip whitespace for UX (but keep duplicate box visible if present)
       e.target.value = (e.target.value || '').replace(/\s+/g, '');
 
-      const f = fields.find(x => x.id === e.target.id);
-      const dupBox = document.getElementById('dup-error-' + f.id);
-
       // schedule recheck; do not clear UI duplicate box immediately
       debouncedRun();
     });
 
-    // blur: immediate validation (but still don't clear duplicate box until server says OK)
+    // blur: immediate validation (but don't clear duplicate until server returns OK)
     document.body.addEventListener('blur', e => {
       if (fields.some(f => f.id === e.target.id)) runValidation(false);
     }, true);
@@ -1173,13 +1174,27 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
   }
 
-  // 7) Init on DOM ready
+  // 7) Observe page changes: clear default errors on page render/change
+  function observePageChanges() {
+    const form = document.querySelector('form');
+    if (!form) return;
+    const mo = new MutationObserver(() => {
+      // mỗi lần mutation, remove default errors to avoid pre-seen native errors
+      clearDefaultErrors(true);
+    });
+    mo.observe(form, { childList: true, subtree: true, attributes: true });
+    // call once to be safe
+    clearDefaultErrors(true);
+  }
+
+  // 8) Init on DOM ready
   document.addEventListener('DOMContentLoaded', () => {
     const mo = new MutationObserver((_, obs) => {
       if (fields.every(f => $(f.id))) {
         obs.disconnect();
-        clearDefaultErrors();
+        clearDefaultErrors(true); // initial aggressive clear
         attachListeners();
+        observePageChanges();
         runValidation(false);
       }
     });
