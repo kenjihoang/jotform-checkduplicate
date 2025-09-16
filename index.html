@@ -933,6 +933,10 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 ;(function(){
   'use strict';
 
+  // guard: tránh chạy nhiều lần khi paste nhầm script nhiều lần
+  if (window.__dupValidatorInitialized) return;
+  window.__dupValidatorInitialized = true;
+
   const workerUrl = 'https://restless-lab-b579.amcham.workers.dev/';
   const fields = [
     { id: 'input_3',  errId: 'id_92', flag: 'emailExists'      },
@@ -944,13 +948,13 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   function $(id){ return document.getElementById(id); }
   function isVisible(el){ return el && el.offsetParent !== null; }
 
-  // 1) Xóa lỗi đỏ mặc định của JotForm trên các field track
+  // 1) Xóa lỗi mặc định trên các field tracked
   //    forceRemove = true => remove mọi lỗi (dùng khi init / page change)
   //    forceRemove = false => chỉ remove nếu field.native valid
   function clearDefaultErrors(forceRemove = true) {
     fields.forEach(f => {
       const inp = $(f.id);
-      const li  = inp?.closest('li.form-line');
+      const li  = inp?.closest && inp.closest('li.form-line');
       if (!li || !inp) return;
       try {
         if (forceRemove || (typeof inp.checkValidity === 'function' && inp.checkValidity())) {
@@ -970,8 +974,8 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
   }
 
-  // 2) Debounce helper
-  function debounce(fn, ms = 300) {
+  // debounce helper
+  function debounce(fn, ms = 200) {
     let timer;
     return (...args) => {
       clearTimeout(timer);
@@ -979,10 +983,10 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     };
   }
 
-  // 3) Hiển thị/ẩn lỗi duplicate giống hệt required, set aria-invalid
+  // 2) Hiển thị/ẩn lỗi duplicate (giữ style như JotForm)
   function showDuplicateError(f, show) {
     const inp = $(f.id);
-    const li  = inp?.closest('li.form-line');
+    const li  = inp?.closest && inp.closest('li.form-line');
     if (!li || !inp) return;
 
     const boxId = 'dup-error-' + f.id;
@@ -995,24 +999,20 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
         box.className = 'form-error-message fade-in';
         inp.insertAdjacentElement('afterend', box);
       }
-      const txt = document.getElementById(f.errId)?.innerText.trim() || 'Duplicate entry';
+      const txt = document.getElementById(f.errId)?.innerText?.trim() || 'Duplicate entry';
       box.textContent = txt;
       li.classList.add('form-line-error');
       inp.classList.add('form-validation-error');
       inp.setAttribute('aria-invalid', 'true');
     } else if (box) {
-      // Remove only if native validity OK; otherwise remove duplicate box but keep native invalid state
       try {
         if (typeof inp.checkValidity === 'function' && !inp.checkValidity()) {
-          // native invalid: remove duplicate message but keep native invalid classes (do not remove classes)
+          // native invalid: remove duplicate message but keep native invalid classes
           box.remove();
           return;
         }
-      } catch (e) {
-        // proceed to safe remove if error
-      }
-
-      // safe to remove duplicate message and classes
+      } catch (e) {}
+      // safe remove duplicate UI
       box.remove();
       li.classList.remove('form-line-error');
       inp.classList.remove('form-validation-error');
@@ -1020,22 +1020,19 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     }
   }
 
-  // 4) Enable/disable Next & Submit
+  // 3) Enable/disable Next & Submit
   function toggleAction(disabled) {
-    document.querySelectorAll(
-      '.form-pagebreak-next, button[type="submit"], input[type="submit"]'
-    ).forEach(btn => {
-      if (btn.offsetParent !== null) btn.disabled = disabled;
-    });
+    document.querySelectorAll('.form-pagebreak-next, button[type="submit"], input[type="submit"]')
+      .forEach(btn => { if (btn.offsetParent !== null) btn.disabled = disabled; });
   }
 
-  // State for pending validation
+  // states
   let currentController = null;
   let pending = false;
-  let lastResult = {}; // store last server result (flags)
-  let lastPayload = {}; // last payload sent
+  let lastResult = {};
+  let lastPayload = {};
 
-  // Strip spaces helper and read values (returns visible fields + payload)
+  // read visible values, strip whitespace for payload
   function readVisibleValues() {
     const visible = fields.filter(f => {
       const inp = $(f.id);
@@ -1044,14 +1041,14 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     const payload = visible.reduce((acc, f) => {
       const el = $(f.id);
       if (!el) return acc;
-      const v = (el.value || '').replace(/\s+/g, ''); // strip whitespace for payload
+      const v = (el.value || '').replace(/\s+/g, '');
       acc[f.flag.replace(/Exists$/, '')] = v;
       return acc;
     }, {});
     return { visible, payload };
   }
 
-  // 5) Chạy kiểm tra duplicate với abort, quản lý pending
+  // 4) Validation request with abort, caching, finalCheck support
   async function runValidation(finalCheck = false) {
     const { visible, payload } = readVisibleValues();
 
@@ -1065,7 +1062,6 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     }
 
     if (Object.values(payload).every(v => !v)) {
-      // nếu tất cả trống: clear duplicate boxes (keeps native errors)
       visible.forEach(f => showDuplicateError(f, false));
       lastResult = {};
       lastPayload = {};
@@ -1074,7 +1070,6 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       return;
     }
 
-    // reuse cached result if same payload and not pending and not finalCheck
     if (!finalCheck && !pending && JSON.stringify(payload) === JSON.stringify(lastPayload)) {
       let hasError = false;
       visible.forEach(f => {
@@ -1086,7 +1081,6 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       return;
     }
 
-    // Cancel previous request
     if (currentController) {
       try { currentController.abort(); } catch(e) {}
       currentController = null;
@@ -1095,13 +1089,11 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     currentController = new AbortController();
     const signal = currentController.signal;
     pending = true;
-    toggleAction(true); // disable actions while checking
+    toggleAction(true);
 
-    const networkTimeout = 8000; // 8s fallback
+    const networkTimeout = 8000;
     const timeoutId = setTimeout(() => {
-      if (currentController) {
-        try{ currentController.abort(); }catch(e){}
-      }
+      if (currentController) try{ currentController.abort(); }catch(e){}
     }, networkTimeout);
 
     try {
@@ -1115,17 +1107,12 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       currentController = null;
       pending = false;
 
-      if (!res.ok) {
-        // server/network error -> permissive: don't block next, keep existing duplicate boxes
-        toggleAction(false);
-        return;
-      }
+      if (!res.ok) { toggleAction(false); return; }
 
       const result = await res.json();
       lastResult = result || {};
       lastPayload = payload;
 
-      // show/update errors per visible field
       let hasError = false;
       visible.forEach(f => {
         const exists = !!result[f.flag];
@@ -1143,13 +1130,11 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
     } catch (err) {
       clearTimeout(timeoutId);
-      if (err.name === 'AbortError') {
+      if (err && err.name === 'AbortError') {
         pending = false;
         currentController = null;
-        // aborted: do not change UI; next debounced run will update
         return;
       }
-      // other errors: permissive
       pending = false;
       currentController = null;
       toggleAction(false);
@@ -1157,100 +1142,108 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     }
   }
 
-  const debouncedRun = debounce(() => runValidation(false), 300);
+  const debouncedRun = debounce(() => runValidation(false), 200);
 
-  // 6) Attach listeners & block space/paste normalization
+  // 5) Attach listeners
   function attachListeners() {
-    // on input: run debounce only when target is tracked field
+    // input: strip whitespace, schedule recheck, but do not clear duplicate UI immediately
     document.body.addEventListener('input', e => {
       if (!fields.some(f => f.id === e.target.id)) return;
-
-      // immediate strip whitespace for UX (but keep duplicate box visible if present)
       e.target.value = (e.target.value || '').replace(/\s+/g, '');
-
-      // schedule recheck; do not clear UI duplicate box immediately
       debouncedRun();
     });
 
-    // blur: immediate validation (but don't clear duplicate until server returns OK)
+    // blur: immediate validation
     document.body.addEventListener('blur', e => {
       if (fields.some(f => f.id === e.target.id)) runValidation(false);
     }, true);
 
-    // Next/Submit click: disable immediately, run final validation and only allow proceed if no duplicate
+    // click Next/Submit: disable immediately, run final check, re-enable only if ok
     document.body.addEventListener('click', e => {
       const btn = e.target.closest('.form-pagebreak-next, button[type="submit"], input[type="submit"]');
-      if (btn) {
-        if (btn.disabled) return;
-        btn.disabled = true;
-
-        (async () => {
-          await runValidation(true);
-
-          const { visible } = readVisibleValues();
-          const hasError = visible.some(f => !!lastResult[f.flag]);
-
-          if (!hasError && !pending) {
-            // small delay to let JotForm handle the click normally
-            setTimeout(() => { try { btn.disabled = false; } catch(e){} }, 50);
-          } else {
-            // keep disabled (errors shown). focus first error
-            const firstErr = visible.find(f => !!lastResult[f.flag]);
-            if (firstErr) $(firstErr.id)?.focus();
-          }
-        })();
-      }
+      if (!btn) return;
+      if (btn.disabled) return;
+      btn.disabled = true;
+      (async () => {
+        await runValidation(true);
+        const { visible } = readVisibleValues();
+        const hasError = visible.some(f => !!lastResult[f.flag]);
+        if (!hasError && !pending) {
+          setTimeout(() => { try { btn.disabled = false; } catch(e){} }, 50);
+        } else {
+          const firstErr = visible.find(f => !!lastResult[f.flag]);
+          if (firstErr) $(firstErr.id)?.focus();
+        }
+      })();
     });
 
-    // prevent space & normalize paste for tracked fields
+    // block space key and normalize paste for tracked fields
     fields.forEach(f => {
       const inp = $(f.id);
-      if (inp) {
-        inp.addEventListener('keypress', e => {
-          if (e.key === ' ') e.preventDefault();
-        });
-        inp.addEventListener('paste', () => {
-          setTimeout(() => {
-            inp.value = (inp.value || '').replace(/\s+/g, '');
-            // after paste schedule immediate validation
-            runValidation(false);
-          }, 0);
-        });
-      }
+      if (!inp) return;
+      inp.addEventListener('keypress', e => { if (e.key === ' ') e.preventDefault(); });
+      inp.addEventListener('paste', () => {
+        setTimeout(() => {
+          inp.value = (inp.value || '').replace(/\s+/g, '');
+          runValidation(false);
+        }, 0);
+      });
     });
   }
 
-  // 7) Observe page changes: clear default errors on page render/change
+  // 6) Observe page changes: debounce, temporary disconnect to avoid self-trigger loops
   function observePageChanges() {
     const form = document.querySelector('form');
     if (!form) return;
-    const mo = new MutationObserver(() => {
-      // mỗi lần mutation, remove default errors to avoid pre-seen native errors
+    let debouncedClear = debounce(() => {
+      try { mo.disconnect(); } catch(e){}
       clearDefaultErrors(true);
+      setTimeout(() => { try { mo.observe(form, moConfig); } catch(e){} }, 120);
+    }, 120);
+
+    const moConfig = { childList: true, subtree: true, attributes: true };
+    const mo = new MutationObserver((mutations) => {
+      const important = mutations.some(m => {
+        const nodes = Array.from(m.addedNodes || []).concat(Array.from(m.removedNodes || []));
+        return nodes.some(n => !(n && n.id && n.id.indexOf('dup-error-') === 0));
+      });
+      if (important) debouncedClear();
     });
-    mo.observe(form, { childList: true, subtree: true, attributes: true });
-    // call once to be safe
+
+    mo.observe(form, moConfig);
     clearDefaultErrors(true);
   }
 
-  // 8) Init on DOM ready
+  // 7) Init guard + start
   document.addEventListener('DOMContentLoaded', () => {
-    const mo = new MutationObserver((_, obs) => {
-      if (fields.every(f => $(f.id))) {
-        obs.disconnect();
-        clearDefaultErrors(true); // initial aggressive clear
+    const start = Date.now();
+    const waitMo = new MutationObserver((_, obs) => {
+      if (fields.every(f => $(f.id)) || Date.now() - start > 5000) {
+        try { obs.disconnect(); } catch(e){}
+        clearDefaultErrors(true);
         attachListeners();
         observePageChanges();
         runValidation(false);
       }
     });
-    mo.observe(document.body, { childList: true, subtree: true });
+    waitMo.observe(document.body, { childList: true, subtree: true });
+
+    // fallback if fields already present
+    setTimeout(() => {
+      if (fields.every(f => $(f.id))) {
+        try { waitMo.disconnect(); } catch(e){}
+        clearDefaultErrors(true);
+        attachListeners();
+        observePageChanges();
+        runValidation(false);
+      }
+    }, 600);
   });
 
 })();
 </script>
 
-<!-- Auto-resize script -->
+<!-- Auto-resize: gửi height lên parent -->
 <script>
 ;(function(){
   function sendHeight() {
@@ -1265,18 +1258,16 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   if ('ResizeObserver' in window) {
     new ResizeObserver(sendHeight).observe(document.body);
   } else {
-    new MutationObserver(sendHeight)
-      .observe(document.body, { childList:true, subtree:true, attributes:true });
+    new MutationObserver(sendHeight).observe(document.body, { childList:true, subtree:true, attributes:true });
   }
 
-  // also send height after some UI events that may change layout
   ['input','change','click','submit'].forEach(evt => {
     document.addEventListener(evt, () => setTimeout(sendHeight, 120));
   });
 
-  // initial delayed send to catch late-rendered elements
   setTimeout(sendHeight, 300);
   setTimeout(sendHeight, 1200);
 })();
 </script>
+
 
