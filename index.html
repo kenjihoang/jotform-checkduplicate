@@ -933,7 +933,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 ;(function(){
   'use strict';
 
-  // guard: tránh chạy nhiều lần khi paste nhầm script nhiều lần
+  // guard: tránh chạy nhiều lần
   if (window.__dupValidatorInitialized) return;
   window.__dupValidatorInitialized = true;
 
@@ -948,27 +948,36 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   function $(id){ return document.getElementById(id); }
   function isVisible(el){ return el && el.offsetParent !== null; }
 
-  // 1) Xóa lỗi mặc định trên các field tracked
-  //    forceRemove = true => remove mọi lỗi (dùng khi init / page change)
-  //    forceRemove = false => chỉ remove nếu field.native valid
+  // 1) Clear default errors but only inside the field's li (avoid touching widgets)
+  //    forceRemove = true -> aggressive (used on init/page change)
+  //    forceRemove = false -> remove only if native checkValidity() passes
   function clearDefaultErrors(forceRemove = true) {
     fields.forEach(f => {
       const inp = $(f.id);
-      const li  = inp?.closest && inp.closest('li.form-line');
+      const li  = inp && typeof inp.closest === 'function' ? inp.closest('li.form-line') : null;
       if (!li || !inp) return;
       try {
-        if (forceRemove || (typeof inp.checkValidity === 'function' && inp.checkValidity())) {
-          li.classList.remove('form-line-error');
-          inp.classList.remove('form-validation-error');
-          inp.removeAttribute('aria-invalid');
-          li.querySelectorAll('.form-error-message').forEach(el => el.remove());
-        }
+        const shouldRemove = forceRemove || (typeof inp.checkValidity === 'function' && inp.checkValidity());
+        if (!shouldRemove) return;
+        // remove only direct children error messages inside this li to avoid removing widget elements elsewhere
+        Array.from(li.children).forEach(child => {
+          if (child && child.classList && child.classList.contains('form-error-message')) {
+            child.remove();
+          }
+        });
+        li.classList.remove('form-line-error');
+        inp.classList.remove('form-validation-error');
+        inp.removeAttribute('aria-invalid');
       } catch (e) {
         if (forceRemove) {
+          Array.from(li.children).forEach(child => {
+            if (child && child.classList && child.classList.contains('form-error-message')) {
+              child.remove();
+            }
+          });
           li.classList.remove('form-line-error');
           inp.classList.remove('form-validation-error');
           inp.removeAttribute('aria-invalid');
-          li.querySelectorAll('.form-error-message').forEach(el => el.remove());
         }
       }
     });
@@ -983,10 +992,10 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     };
   }
 
-  // 2) Hiển thị/ẩn lỗi duplicate (giữ style như JotForm)
+  // 2) Show / hide duplicate error for a tracked field
   function showDuplicateError(f, show) {
     const inp = $(f.id);
-    const li  = inp?.closest && inp.closest('li.form-line');
+    const li  = inp && typeof inp.closest === 'function' ? inp.closest('li.form-line') : null;
     if (!li || !inp) return;
 
     const boxId = 'dup-error-' + f.id;
@@ -1006,13 +1015,13 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       inp.setAttribute('aria-invalid', 'true');
     } else if (box) {
       try {
+        // if native invalid (required/pattern) keep native state but remove duplicate message
         if (typeof inp.checkValidity === 'function' && !inp.checkValidity()) {
-          // native invalid: remove duplicate message but keep native invalid classes
           box.remove();
           return;
         }
       } catch (e) {}
-      // safe remove duplicate UI
+      // otherwise safe remove duplicate UI
       box.remove();
       li.classList.remove('form-line-error');
       inp.classList.remove('form-validation-error');
@@ -1020,19 +1029,19 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     }
   }
 
-  // 3) Enable/disable Next & Submit
+  // 3) Enable/disable Next & Submit buttons that are visible
   function toggleAction(disabled) {
     document.querySelectorAll('.form-pagebreak-next, button[type="submit"], input[type="submit"]')
       .forEach(btn => { if (btn.offsetParent !== null) btn.disabled = disabled; });
   }
 
-  // states
+  // states for validation
   let currentController = null;
   let pending = false;
   let lastResult = {};
   let lastPayload = {};
 
-  // read visible values, strip whitespace for payload
+  // read visible tracked fields and return payload with whitespace stripped
   function readVisibleValues() {
     const visible = fields.filter(f => {
       const inp = $(f.id);
@@ -1048,7 +1057,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     return { visible, payload };
   }
 
-  // 4) Validation request with abort, caching, finalCheck support
+  // 4) runValidation: calls workerUrl, supports abort, caching, finalCheck mode
   async function runValidation(finalCheck = false) {
     const { visible, payload } = readVisibleValues();
 
@@ -1062,6 +1071,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     }
 
     if (Object.values(payload).every(v => !v)) {
+      // no values entered: remove duplicate boxes (leave native validation alone)
       visible.forEach(f => showDuplicateError(f, false));
       lastResult = {};
       lastPayload = {};
@@ -1070,6 +1080,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       return;
     }
 
+    // reuse cached result if payload unchanged and not finalCheck and not pending
     if (!finalCheck && !pending && JSON.stringify(payload) === JSON.stringify(lastPayload)) {
       let hasError = false;
       visible.forEach(f => {
@@ -1081,8 +1092,9 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       return;
     }
 
+    // abort prior request
     if (currentController) {
-      try { currentController.abort(); } catch(e) {}
+      try { currentController.abort(); } catch (e) {}
       currentController = null;
     }
 
@@ -1093,7 +1105,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
     const networkTimeout = 8000;
     const timeoutId = setTimeout(() => {
-      if (currentController) try{ currentController.abort(); }catch(e){}
+      if (currentController) try { currentController.abort(); } catch(e) {}
     }, networkTimeout);
 
     try {
@@ -1107,7 +1119,11 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       currentController = null;
       pending = false;
 
-      if (!res.ok) { toggleAction(false); return; }
+      if (!res.ok) {
+        // server error: permissive, do not block
+        toggleAction(false);
+        return;
+      }
 
       const result = await res.json();
       lastResult = result || {};
@@ -1127,7 +1143,6 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
       toggleAction(hasError);
       return;
-
     } catch (err) {
       clearTimeout(timeoutId);
       if (err && err.name === 'AbortError') {
@@ -1144,9 +1159,9 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
   const debouncedRun = debounce(() => runValidation(false), 200);
 
-  // 5) Attach listeners
+  // 5) Attach listeners (input/blur/click/paste)
   function attachListeners() {
-    // input: strip whitespace, schedule recheck, but do not clear duplicate UI immediately
+    // input: strip whitespace for tracked fields and schedule recheck (keep duplicate UI until server says OK)
     document.body.addEventListener('input', e => {
       if (!fields.some(f => f.id === e.target.id)) return;
       e.target.value = (e.target.value || '').replace(/\s+/g, '');
@@ -1177,7 +1192,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       })();
     });
 
-    // block space key and normalize paste for tracked fields
+    // block space key + paste normalization for tracked inputs
     fields.forEach(f => {
       const inp = $(f.id);
       if (!inp) return;
@@ -1191,35 +1206,48 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
   }
 
-  // 6) Observe page changes: debounce, temporary disconnect to avoid self-trigger loops
+  // 6) Observe page/form changes but ignore widget containers (to avoid interfering with Terms widget)
   function observePageChanges() {
     const form = document.querySelector('form');
     if (!form) return;
-    let debouncedClear = debounce(() => {
-      try { mo.disconnect(); } catch(e){}
-      clearDefaultErrors(true);
-      setTimeout(() => { try { mo.observe(form, moConfig); } catch(e){} }, 120);
-    }, 120);
 
     const moConfig = { childList: true, subtree: true, attributes: true };
     const mo = new MutationObserver((mutations) => {
       const important = mutations.some(m => {
         const nodes = Array.from(m.addedNodes || []).concat(Array.from(m.removedNodes || []));
-        return nodes.some(n => !(n && n.id && n.id.indexOf('dup-error-') === 0));
+        return nodes.some(n => {
+          if (!(n && n.nodeType === 1)) return false;
+          // ignore our own dup-error nodes
+          if (n.id && n.id.indexOf('dup-error-') === 0) return false;
+          // ignore known widget containers / iframes to avoid interrupting widget rendering
+          const cls = n.classList || [];
+          if (cls.contains && (cls.contains('form-widget') || cls.contains('terms-widget'))) return false;
+          if (n.tagName === 'IFRAME') return false;
+          return true;
+        });
       });
-      if (important) debouncedClear();
+      if (!important) return;
+      // debounce cleanup, temporary disconnect to avoid self-trigger loops
+      debouncedClear();
     });
 
+    let debouncedClear = debounce(() => {
+      try { mo.disconnect(); } catch(_) {}
+      clearDefaultErrors(true);
+      setTimeout(() => { try { mo.observe(form, moConfig); } catch(_) {} }, 150);
+    }, 150);
+
     mo.observe(form, moConfig);
+    // initial aggressive clear once
     clearDefaultErrors(true);
   }
 
-  // 7) Init guard + start
+  // 7) Init on DOMContentLoaded; wait for fields or fallback after timeout
   document.addEventListener('DOMContentLoaded', () => {
     const start = Date.now();
     const waitMo = new MutationObserver((_, obs) => {
       if (fields.every(f => $(f.id)) || Date.now() - start > 5000) {
-        try { obs.disconnect(); } catch(e){}
+        try { obs.disconnect(); } catch(_) {}
         clearDefaultErrors(true);
         attachListeners();
         observePageChanges();
@@ -1228,10 +1256,10 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
     waitMo.observe(document.body, { childList: true, subtree: true });
 
-    // fallback if fields already present
+    // fallback if fields are already present
     setTimeout(() => {
       if (fields.every(f => $(f.id))) {
-        try { waitMo.disconnect(); } catch(e){}
+        try { waitMo.disconnect(); } catch(_) {}
         clearDefaultErrors(true);
         attachListeners();
         observePageChanges();
@@ -1243,7 +1271,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 })();
 </script>
 
-<!-- Auto-resize: gửi height lên parent -->
+<!-- Auto-resize: gửi height lên parent (giữ nguyên) -->
 <script>
 ;(function(){
   function sendHeight() {
@@ -1269,5 +1297,3 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   setTimeout(sendHeight, 1200);
 })();
 </script>
-
-
