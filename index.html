@@ -899,7 +899,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   function isVisible(el){ return el && el.offsetParent !== null; }
 
   // 1) Xóa lỗi đỏ mặc định của JotForm trên các field track
-  //    Chỉ xóa nếu field hiện tại hợp lệ theo HTML5 để không che lỗi required gốc
+  //    Chỉ xóa nếu field hiện tại hợp lệ theo HTML5 (dùng 1 lần khi init)
   function clearDefaultErrors() {
     fields.forEach(f => {
       const inp = $(f.id);
@@ -918,7 +918,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
   }
 
-  // 2) Debounce helper (shorter)
+  // 2) Debounce helper
   function debounce(fn, ms = 300) {
     let timer;
     return (...args) => {
@@ -949,19 +949,23 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       inp.classList.add('form-validation-error');
       inp.setAttribute('aria-invalid', 'true');
     } else if (box) {
+      // Remove only if native validity OK; otherwise keep showing appropriate invalid state
+      try {
+        if (typeof inp.checkValidity === 'function' && !inp.checkValidity()) {
+          // native invalid (e.g., required/pattern): keep aria-invalid true, remove duplicate box if present
+          // but do not clear native classes here (allow JotForm to show native error)
+          box.remove();
+          return;
+        }
+      } catch (e) {
+        // on error, proceed to safe remove
+      }
+
+      // safe to remove duplicate message and classes
       box.remove();
       li.classList.remove('form-line-error');
       inp.classList.remove('form-validation-error');
-      // restore validity attribute: if native invalid, keep aria-invalid
-      try {
-        if (typeof inp.checkValidity === 'function' && !inp.checkValidity()) {
-          inp.setAttribute('aria-invalid', 'true');
-        } else {
-          inp.removeAttribute('aria-invalid');
-        }
-      } catch (e) {
-        inp.removeAttribute('aria-invalid');
-      }
+      inp.removeAttribute('aria-invalid');
     }
   }
 
@@ -977,9 +981,10 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   // State for pending validation
   let currentController = null;
   let pending = false;
-  let lastResult = {}; // store last server result
+  let lastResult = {}; // store last server result (flags)
+  let lastPayload = {}; // last payload sent
 
-  // Strip spaces helper and read values
+  // Strip spaces helper and read values (returns visible fields + payload)
   function readVisibleValues() {
     const visible = fields.filter(f => {
       const inp = $(f.id);
@@ -988,7 +993,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     const payload = visible.reduce((acc, f) => {
       const el = $(f.id);
       if (!el) return acc;
-      const v = (el.value || '').replace(/\s+/g, ''); // strip whitespace
+      const v = (el.value || '').replace(/\s+/g, ''); // strip whitespace for payload
       acc[f.flag.replace(/Exists$/, '')] = v;
       return acc;
     }, {});
@@ -997,25 +1002,41 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
   // 5) Chạy kiểm tra duplicate với abort, quản lý pending
   async function runValidation(finalCheck = false) {
-    // finalCheck true khi user bấm Next: force run and disable buttons until done
     const { visible, payload } = readVisibleValues();
 
     if (visible.length === 0) {
       fields.forEach(f => showDuplicateError(f, false));
       lastResult = {};
+      lastPayload = {};
       pending = false;
       toggleAction(false);
       return;
     }
 
     if (Object.values(payload).every(v => !v)) {
+      // nếu tất cả trống: clear duplicate boxes (keeps native errors)
       visible.forEach(f => showDuplicateError(f, false));
       lastResult = {};
+      lastPayload = {};
       pending = false;
       toggleAction(false);
       return;
     }
 
+    // if same payload as last successful check and not pending, reuse lastResult
+    if (!finalCheck && !pending && JSON.stringify(payload) === JSON.stringify(lastPayload)) {
+      // use cached result
+      let hasError = false;
+      visible.forEach(f => {
+        const exists = !!lastResult[f.flag];
+        showDuplicateError(f, exists);
+        if (exists) hasError = true;
+      });
+      toggleAction(hasError);
+      return;
+    }
+
+    // Cancel previous request
     if (currentController) {
       try { currentController.abort(); } catch(e) {}
       currentController = null;
@@ -1045,15 +1066,16 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       pending = false;
 
       if (!res.ok) {
-        visible.forEach(f => showDuplicateError(f, false));
-        lastResult = {};
+        // server/network error -> permissive: don't block next, but keep existing duplicate boxes
         toggleAction(false);
         return;
       }
 
       const result = await res.json();
       lastResult = result || {};
+      lastPayload = payload;
 
+      // show/update errors per visible field
       let hasError = false;
       visible.forEach(f => {
         const exists = !!result[f.flag];
@@ -1074,12 +1096,12 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       if (err.name === 'AbortError') {
         pending = false;
         currentController = null;
+        // aborted: do not change UI; next debounced run will update
         return;
       }
+      // other errors: permissive
       pending = false;
       currentController = null;
-      visible.forEach(f => showDuplicateError(f, false));
-      lastResult = {};
       toggleAction(false);
       return;
     }
@@ -1091,31 +1113,41 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   function attachListeners() {
     // on input: run debounce only when target is tracked field
     document.body.addEventListener('input', e => {
-      if (fields.some(f => f.id === e.target.id)) {
-        // immediate strip whitespace for UX
-        e.target.value = (e.target.value || '').replace(/\s+/g, '');
-        debouncedRun();
-      }
+      if (!fields.some(f => f.id === e.target.id)) return;
+
+      // immediate strip whitespace for UX (but keep duplicate box visible if present)
+      e.target.value = (e.target.value || '').replace(/\s+/g, '');
+
+      const f = fields.find(x => x.id === e.target.id);
+      const dupBox = document.getElementById('dup-error-' + f.id);
+
+      // schedule recheck; do not clear UI duplicate box immediately
+      debouncedRun();
     });
 
-    // blur: immediate validation
+    // blur: immediate validation (but still don't clear duplicate box until server says OK)
     document.body.addEventListener('blur', e => {
       if (fields.some(f => f.id === e.target.id)) runValidation(false);
     }, true);
 
-    // Next/Submit click: disable immediately, run final validation and only proceed if no duplicate
+    // Next/Submit click: disable immediately, run final validation and only allow proceed if no duplicate
     document.body.addEventListener('click', e => {
       const btn = e.target.closest('.form-pagebreak-next, button[type="submit"], input[type="submit"]');
       if (btn) {
         if (btn.disabled) return;
         btn.disabled = true;
+
         (async () => {
           await runValidation(true);
+
           const { visible } = readVisibleValues();
           const hasError = visible.some(f => !!lastResult[f.flag]);
+
           if (!hasError && !pending) {
+            // small delay to let JotForm handle the click normally
             setTimeout(() => { try { btn.disabled = false; } catch(e){} }, 50);
           } else {
+            // keep disabled (errors shown). focus first error
             const firstErr = visible.find(f => !!lastResult[f.flag]);
             if (firstErr) $(firstErr.id)?.focus();
           }
@@ -1133,6 +1165,8 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
         inp.addEventListener('paste', () => {
           setTimeout(() => {
             inp.value = (inp.value || '').replace(/\s+/g, '');
+            // after paste schedule immediate validation
+            runValidation(false);
           }, 0);
         });
       }
@@ -1184,31 +1218,3 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   setTimeout(sendHeight, 1200);
 })();
 </script>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
