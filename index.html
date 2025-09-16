@@ -948,7 +948,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   function $(id){ return document.getElementById(id); }
   function isVisible(el){ return el && el.offsetParent !== null; }
 
-  // 1) Clear default errors but only inside the field's li (avoid touching widgets)
+  // 1) Clear default errors but DO NOT remove our dup-error boxes
   //    forceRemove = true -> aggressive (used on init/page change)
   //    forceRemove = false -> remove only if native checkValidity() passes
   function clearDefaultErrors(forceRemove = true) {
@@ -959,24 +959,41 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
       try {
         const shouldRemove = forceRemove || (typeof inp.checkValidity === 'function' && inp.checkValidity());
         if (!shouldRemove) return;
+        // chỉ remove các .form-error-message trực tiếp trong li, nhưng BẢO VỆ các node dup-error-*
         Array.from(li.children).forEach(child => {
-          if (child && child.classList && child.classList.contains('form-error-message')) {
-            child.remove();
-          }
+          if (!child || !child.classList) return;
+          if (!child.classList.contains('form-error-message')) return;
+          // nếu là box duplicate do script tạo thì skip
+          if (child.id && child.id.indexOf('dup-error-') === 0) return;
+          child.remove();
         });
-        li.classList.remove('form-line-error');
-        inp.classList.remove('form-validation-error');
-        inp.removeAttribute('aria-invalid');
-      } catch (e) {
-        if (forceRemove) {
-          Array.from(li.children).forEach(child => {
-            if (child && child.classList && child.classList.contains('form-error-message')) {
-              child.remove();
-            }
-          });
+        // nếu không có dup box, safe remove native error classes; nếu có dup box, giữ aria-invalid
+        const dupBox = document.getElementById('dup-error-' + f.id);
+        if (!dupBox) {
           li.classList.remove('form-line-error');
           inp.classList.remove('form-validation-error');
           inp.removeAttribute('aria-invalid');
+        } else {
+          inp.setAttribute('aria-invalid', 'true');
+        }
+      } catch (e) {
+        if (forceRemove) {
+          Array.from(li.children).forEach(child => {
+            try {
+              if (!child || !child.classList) return;
+              if (!child.classList.contains('form-error-message')) return;
+              if (child.id && child.id.indexOf('dup-error-') === 0) return;
+              child.remove();
+            } catch(_) {}
+          });
+          const dupBox = document.getElementById('dup-error-' + f.id);
+          if (!dupBox) {
+            li.classList.remove('form-line-error');
+            inp.classList.remove('form-validation-error');
+            inp.removeAttribute('aria-invalid');
+          } else {
+            inp.setAttribute('aria-invalid', 'true');
+          }
         }
       }
     });
@@ -1015,10 +1032,12 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     } else if (box) {
       try {
         if (typeof inp.checkValidity === 'function' && !inp.checkValidity()) {
+          // native invalid: remove duplicate message but keep native invalid state
           box.remove();
           return;
         }
       } catch (e) {}
+      // safe remove duplicate UI
       box.remove();
       li.classList.remove('form-line-error');
       inp.classList.remove('form-validation-error');
@@ -1155,7 +1174,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
   const debouncedRun = debounce(() => runValidation(false), 300);
 
-  // 5) Attach listeners (updated: do not clear duplicate UI on blur)
+  // 5) Attach listeners (do not clear duplicate UI on blur)
   function attachListeners() {
     // input: strip whitespace for tracked fields and schedule recheck; keep duplicate UI until server responds
     document.body.addEventListener('input', e => {
@@ -1281,4 +1300,3 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
   setTimeout(sendHeight, 1200);
 })();
 </script>
-
