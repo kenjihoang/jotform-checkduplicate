@@ -894,10 +894,14 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     { id: 'input_53', errId: 'id_94', flag: 'studentIdExists' }
   ];
 
+  // helpers
+  function $(id){ return document.getElementById(id); }
+  function isVisible(el){ return el && el.offsetParent !== null; }
+
   // 1) Xóa lỗi đỏ mặc định của JotForm trên các field track
   function clearDefaultErrors() {
     fields.forEach(f => {
-      const inp = document.getElementById(f.id);
+      const inp = $(f.id);
       const li  = inp?.closest('li.form-line');
       if (!li || !inp) return;
       li.classList.remove('form-line-error');
@@ -906,8 +910,8 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
   }
 
-  // 2) Debounce helper
-  function debounce(fn, ms = 100) {
+  // 2) Debounce helper (shorter)
+  function debounce(fn, ms = 300) {
     let timer;
     return (...args) => {
       clearTimeout(timer);
@@ -917,7 +921,7 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 
   // 3) Hiển thị/ẩn lỗi duplicate giống hệt required
   function showDuplicateError(f, show) {
-    const inp = document.getElementById(f.id);
+    const inp = $(f.id);
     const li  = inp?.closest('li.form-line');
     if (!li || !inp) return;
 
@@ -951,93 +955,200 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
     });
   }
 
-  // 5) Chạy kiểm tra duplicate
-  async function runValidation() {
-  const visible = fields.filter(f => {
-    const inp = document.getElementById(f.id);
-    return inp && inp.offsetParent !== null;
-  });
+  // State for pending validation
+  let currentController = null;
+  let pending = false;
+  let lastResult = {}; // store last server result
 
-  if (visible.length === 0) {
-    fields.forEach(f => showDuplicateError(f, false));
-    return; // ✅ Không chặn Next, để JotForm xử lý required
-  }
-
-  const payload = visible.reduce((acc, f) => {
-    acc[f.flag.replace(/Exists$/, '')] = document.getElementById(f.id).value.trim();
-    return acc;
-  }, {});
-
-  if (Object.values(payload).every(v => !v)) {
-    visible.forEach(f => showDuplicateError(f, false));
-    return; // ✅ Không chặn Next nếu chưa nhập gì
-  }
-
-  let result = {};
-  try {
-    const res = await fetch(workerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+  // Strip spaces helper and read values
+  function readVisibleValues() {
+    const visible = fields.filter(f => {
+      const inp = $(f.id);
+      return inp && isVisible(inp);
     });
-    result = await res.json();
-  } catch {
-    return; // ✅ Không chặn Next nếu lỗi mạng
+    const payload = visible.reduce((acc, f) => {
+      const el = $(f.id);
+      if (!el) return acc;
+      const v = (el.value || '').replace(/\s+/g, ''); // strip whitespace
+      acc[f.flag.replace(/Exists$/, '')] = v;
+      return acc;
+    }, {});
+    return { visible, payload };
   }
 
-  let hasError = false;
-  visible.forEach(f => {
-    const exists = !!result[f.flag];
-    showDuplicateError(f, exists);
-    if (exists) hasError = true;
-  });
+  // 5) Chạy kiểm tra duplicate với abort, quản lý pending
+  async function runValidation(finalCheck = false) {
+    // finalCheck true khi user bấm Next: force run and disable buttons until done
+    // read visible fields + payload
+    const { visible, payload } = readVisibleValues();
 
-  toggleAction(hasError); // ✅ Chỉ chặn nếu có lỗi duplicate
-}
+    // nếu không có field visible: clear và không chặn next
+    if (visible.length === 0) {
+      fields.forEach(f => showDuplicateError(f, false));
+      lastResult = {};
+      pending = false;
+      toggleAction(false);
+      return;
+    }
 
-  const debouncedRun = debounce(runValidation, 100);
+    // if all visible payload values empty -> clear errors, do not call server
+    if (Object.values(payload).every(v => !v)) {
+      visible.forEach(f => showDuplicateError(f, false));
+      lastResult = {};
+      pending = false;
+      toggleAction(false);
+      return;
+    }
 
-  // 6) Gắn listener & block space
+    // Cancel previous request
+    if (currentController) {
+      try { currentController.abort(); } catch(e) {}
+      currentController = null;
+    }
+
+    currentController = new AbortController();
+    const signal = currentController.signal;
+    pending = true;
+    toggleAction(true); // disable actions while checking
+
+    // set a small timeout for network fallback (so user isn't stuck forever)
+    const networkTimeout = 8000; // 8s
+    const timeoutId = setTimeout(() => {
+      if (currentController) {
+        try{ currentController.abort(); }catch(e){}
+      }
+    }, networkTimeout);
+
+    try {
+      const res = await fetch(workerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal
+      });
+      clearTimeout(timeoutId);
+      currentController = null;
+      pending = false;
+
+      if (!res.ok) {
+        // network/server error -> be permissive: don't block next
+        visible.forEach(f => showDuplicateError(f, false));
+        lastResult = {};
+        toggleAction(false);
+        return;
+      }
+
+      const result = await res.json();
+      lastResult = result || {};
+
+      // show errors per visible field
+      let hasError = false;
+      visible.forEach(f => {
+        const exists = !!result[f.flag];
+        showDuplicateError(f, exists);
+        if (exists) hasError = true;
+      });
+
+      // if finalCheck (user clicked Next) and hasError -> keep disabled and focus first error
+      if (finalCheck && hasError) {
+        const first = visible.find(f => !!result[f.flag]);
+        $(first.id)?.focus();
+      }
+
+      toggleAction(hasError);
+      return;
+
+    } catch (err) {
+      clearTimeout(timeoutId);
+      // if aborted: we don't change UI state here because next validation will run
+      if (err.name === 'AbortError') {
+        // leave pending = false handled above in finally-ish
+        pending = false;
+        currentController = null;
+        // do not enable Next here; next debounced call will handle
+        return;
+      }
+      // other errors: network etc -> permissive: allow Next
+      pending = false;
+      currentController = null;
+      visible.forEach(f => showDuplicateError(f, false));
+      lastResult = {};
+      toggleAction(false);
+      return;
+    }
+  }
+
+  const debouncedRun = debounce(() => runValidation(false), 300);
+
+  // 6) Attach listeners & block space/paste normalization
   function attachListeners() {
-    // input debounce
+    // on input: run debounce only when target is tracked field
     document.body.addEventListener('input', e => {
-      if (fields.some(f => f.id === e.target.id)) debouncedRun();
-    });
-    // blur (khi click ra ngoài)
-    document.body.addEventListener('blur', e => {
-      if (fields.some(f => f.id === e.target.id)) runValidation();
-    }, true);
-    // Next/Submit click
-    document.body.addEventListener('click', e => {
-      if (e.target.closest('.form-pagebreak-next, button[type="submit"], input[type="submit"]')) {
-        setTimeout(runValidation, 0);
+      if (fields.some(f => f.id === e.target.id)) {
+        // immediate strip whitespace for UX
+        e.target.value = (e.target.value || '').replace(/\s+/g, '');
+        debouncedRun();
       }
     });
 
-    // chặn space & strip khoảng trắng khi paste cho cả 3 field
+    // blur: immediate validation
+    document.body.addEventListener('blur', e => {
+      if (fields.some(f => f.id === e.target.id)) runValidation(false);
+    }, true);
+
+    // Next/Submit click: disable immediately, run final validation and only proceed if no duplicate
+    document.body.addEventListener('click', e => {
+      const btn = e.target.closest('.form-pagebreak-next, button[type="submit"], input[type="submit"]');
+      if (btn) {
+        // If already disabled, ignore
+        if (btn.disabled) return;
+
+        // disable immediately to prevent fast next
+        btn.disabled = true;
+
+        // run final validation; if ok -> allow next by re-enabling (JotForm will proceed)
+        // we schedule runValidation as finalCheck and then re-enable only when it's ok
+        (async () => {
+          await runValidation(true);
+          // if there is no pending result and lastResult has no errors for visible -> enable to allow next
+          const { visible } = readVisibleValues();
+          const hasError = visible.some(f => !!lastResult[f.flag]);
+          if (!hasError && !pending) {
+            // small delay to let JotForm handle the click normally
+            setTimeout(() => { try { btn.disabled = false; } catch(e){} }, 50);
+          } else {
+            // keep disabled (errors shown). focus first error
+            const firstErr = visible.find(f => !!lastResult[f.flag]);
+            if (firstErr) $(firstErr.id)?.focus();
+          }
+        })();
+      }
+    });
+
+    // prevent space & normalize paste for tracked fields
     fields.forEach(f => {
-      const inp = document.getElementById(f.id);
+      const inp = $(f.id);
       if (inp) {
         inp.addEventListener('keypress', e => {
           if (e.key === ' ') e.preventDefault();
         });
         inp.addEventListener('paste', () => {
           setTimeout(() => {
-            inp.value = inp.value.replace(/\s+/g, '');
+            inp.value = (inp.value || '').replace(/\s+/g, '');
           }, 0);
         });
       }
     });
   }
 
-  // 7) Khởi chạy khi form render xong
+  // 7) Init on DOM ready
   document.addEventListener('DOMContentLoaded', () => {
     const mo = new MutationObserver((_, obs) => {
-      if (fields.every(f => document.getElementById(f.id))) {
+      if (fields.every(f => $(f.id))) {
         obs.disconnect();
         clearDefaultErrors();
         attachListeners();
-        runValidation();
+        runValidation(false);
       }
     });
     mo.observe(document.body, { childList: true, subtree: true });
@@ -1046,24 +1157,6 @@ JotForm.paymentExtrasOnTheFly([null,{"name":"q1_header","qid":"1","text":"AMCHAM
 })();
 </script>
 
-<!-- Auto-resize script -->
-<script>
-;(function(){
-  function sendHeight() {
-    var h = document.documentElement.scrollHeight;
-    parent.postMessage({ type: 'SOURCE_FORM_HEIGHT', height: h }, '*');
-  }
-
-  window.addEventListener('load', sendHeight);
-
-  if ('ResizeObserver' in window) {
-    new ResizeObserver(sendHeight).observe(document.body);
-  } else {
-    new MutationObserver(sendHeight)
-      .observe(document.body, { childList:true, subtree:true, attributes:true });
-  }
-})();
-</script>
 
 
 
